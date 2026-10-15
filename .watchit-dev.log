@@ -232,3 +232,4 @@ DB connected!
  DELETE /api/parties/644145 200 in 1185ms (next.js: 9ms, application-code: 1176ms)
  GET /api/chats/644145 404 in 114ms (next.js: 11ms, application-code: 103ms)
  GET / 200 in 23ms (next.js: 3ms, application-code: 20ms)
+ GET / 200 in 143ms (next.js: 33ms, application-code: 110ms)
