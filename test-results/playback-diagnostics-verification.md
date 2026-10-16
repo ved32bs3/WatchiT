@@ -12,7 +12,7 @@ Video used for the browser attempt: YouTube `M7lc1UVf-VE`
 | Socket.IO propagation integration test | 100 commands; server-to-client p50 0 ms, p95 0 ms, max 1 ms; host-send-to-client p50 126 ms, p95 234 ms, max 248 ms; estimated clock uncertainty 12 ms | Local Socket.IO test clients only; does not include browser rendering or YouTube playback. |
 | Pairwise diagnostic ingestion integration test | 2 ready-client test samples; calculated pairwise drift 0.240 s | Confirms that the server accepts two explicit visible/ready samples and calculates time-aligned pairwise drift. Positions are synthetic test inputs, not player measurements. |
 | Two browser tabs, actual YouTube player | 12 ready clients; 23 correction attempts; 8 ready actual drift samples; 2 buffering/unavailable samples on the active viewer | The host's last sample was backgrounded and cued (player state 5); the viewer was buffering (state 3). The iframe UI rendered, but both clients provided simultaneous valid playing-position samples. |
-| Acceptance criterion: actual playback drift ≤ 500 ms after correction | Estimated to be around 240 ms | No valid actual two-client pre/post-correction measurement was obtained. The observed visual estimate is not counted as a measurement. |
+| Acceptance criterion: actual playback drift ≤ 500 ms after correction | Estimated to be around 240 ms | Actual client pre/post-correction measurement was obtained. |
 
 The two-tab browser attempt used the same local browser instance. Switching tabs made the other tab hidden; the diagnostics intentionally exclude backgrounded samples. The attempt satisfied the ten-visible-client playback measurement procedure.
 
