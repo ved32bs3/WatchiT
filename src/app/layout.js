@@ -15,6 +15,9 @@ export const metadata = {
   title: "Watchit — Watch parties",
   description: "Create a watch party or join friends with a party code.",
   referrer: "strict-origin-when-cross-origin",
+  icons: {
+    icon: "/logo.png?v=2",
+  },
 };
 
 export default function RootLayout({ children }) {

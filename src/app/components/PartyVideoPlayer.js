@@ -56,6 +56,11 @@ export default function PartyVideoPlayer({ videoId, videoUrl, isHost, playback, 
         },
         events: {
           onReady: (event) => {
+            console.log("[WatchiT player]", {
+              isHost,
+              controls: isHost ? 1 : 0,
+              videoId,
+            });
             if (cancelled) return;
             const iframe = event.target.getIframe();
             iframe.setAttribute("tabindex", isHost ? "0" : "-1");

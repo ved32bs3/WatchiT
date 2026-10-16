@@ -9,3 +9,35 @@ To eliminate this warning, add "type": "module" to \\?\C:\Users\ved_praja_075\De
 (node:52232) [MONGOOSE] Warning: mongoose: the `new` option for `findOneAndUpdate()` and `findOneAndReplace()` is deprecated. Use `returnDocument: 'after'` instead.
 (node:52232) [MONGOOSE] Warning: mongoose: the `new` option for `findOneAndUpdate()` and `findOneAndReplace()` is deprecated. Use `returnDocument: 'after'` instead.
 (node:52232) [MONGOOSE] Warning: mongoose: the `new` option for `findOneAndUpdate()` and `findOneAndReplace()` is deprecated. Use `returnDocument: 'after'` instead.
+(node:52232) [MONGOOSE] Warning: mongoose: the `new` option for `findOneAndUpdate()` and `findOneAndReplace()` is deprecated. Use `returnDocument: 'after'` instead.
+⨯ ReferenceError: l is not defined
+    at ignore-listed frames
+⨯ ReferenceError: l is not defined
+    at ignore-listed frames {
+  page: '/'
+}
+⨯ ReferenceError: l is not defined
+    at ignore-listed frames {
+  page: '/'
+}
+⨯ ReferenceError: l is not defined
+    at ignore-listed frames {
+  page: '/'
+}
+⨯ ReferenceError: l is not defined
+    at ignore-listed frames {
+  page: '/'
+}
+⨯ ReferenceError: l is not defined
+    at ignore-listed frames {
+  page: '/'
+}
+⨯ ReferenceError: l is not defined
+    at ignore-listed frames {
+  page: '/'
+}
+⨯ ReferenceError: l is not defined
+    at ignore-listed frames {
+  page: '/'
+}
+[browser] Uncaught ReferenceError: l is not defined
