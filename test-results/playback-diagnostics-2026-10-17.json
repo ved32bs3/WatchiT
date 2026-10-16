@@ -2,10 +2,12 @@
   "runDate": "2026-10-17",
   "timezone": "Asia/Kolkata",
   "application": "http://localhost:3001",
+  "videoId": "M7lc1UVf-VE",
   "automated": {
     "fullSuite": {
       "passed": 25,
-      "failed": 0
+      "failed": 0,
+      "status": "passed"
     },
     "socketIoPropagation": {
       "sampleCount": 100,
@@ -57,5 +59,34 @@
       "Later browser events included ERR_INTERNET_DISCONNECTED and ERR_NETWORK_CHANGED."
     ],
     "acceptance500ms": "Not verified"
+  },
+  "acceptanceTargets": {
+    "playbackDriftAfterCorrectionMs": {
+      "maximum": 500,
+      "status": "not_verified",
+      "reason": "No valid actual two-client pre/post-correction playback measurement was obtained."
+    },
+    "controlPropagationLatencyP95Ms": {
+      "maximum": 250,
+      "status": "partially_verified",
+      "observedLocalHostSendToClientP95Ms": 1,
+      "reason": "Local Socket.IO test-client result only; end-to-end browser behavior is not established."
+    },
+    "concurrentUsersPerRoom": {
+      "minimum": 10,
+      "status": "not_verified",
+      "reason": "No 10-user concurrent room load test result was provided."
+    },
+    "reproducibleTestEvidence": {
+      "required": true,
+      "status": "partially_verified",
+      "reason": "Automated test results are available, but valid two-browser actual-player evidence is missing."
+    }
+  },
+  "interpretation": {
+    "measuredResultsArePreserved": true,
+    "syntheticAndRealPlayerEvidenceSeparated": true,
+    "unmeasuredValuesRepresentedAsNull": true,
+    "note": "Acceptance targets are requirements, not observed measurements. Do not treat null drift or correction-duration values as zero."
   }
 }
