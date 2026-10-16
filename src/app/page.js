@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import VideoSearch from "./components/VideoSearch";
@@ -23,11 +23,18 @@ export default function Home() {
   const [joinSuccess, setJoinSuccess] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
+  const previewRef = useRef(null);
 
   const videoId = selectedVideo?.id || getYouTubeVideoId(videoUrl.trim());
   const playerSrc = videoId
     ? `https://www.youtube.com/embed/${videoId}?${new URLSearchParams({ enablejsapi: "1", origin: typeof window === "undefined" ? "" : window.location.origin })}`
     : null;
+
+  useEffect(() => {
+    if (!selectedVideo) return;
+    previewRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    previewRef.current?.focus({ preventScroll: true });
+  }, [selectedVideo]);
 
   async function handleCreateParty(event) {
     event.preventDefault();
@@ -44,7 +51,11 @@ export default function Home() {
 
     setIsCreating(true);
     try {
-      const result = await createParty({ hostName: normalizedName, videoUrl: normalizedUrl });
+      const result = await createParty({
+        hostName: normalizedName,
+        videoUrl: normalizedUrl,
+        videoDetails: selectedVideo,
+      });
       router.push(`/party/${result.partyCode}`);
     } catch (error) {
       setHostError(error.message);
@@ -148,7 +159,7 @@ export default function Home() {
         {showVideoSearch && (
           <section id="host-video-search" className="mt-12 border-t border-white/10 pt-9" aria-labelledby="video-discovery-heading">
             {videoId && (
-              <div className="mb-8 overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl shadow-black/40">
+              <div ref={previewRef} tabIndex={-1} className="mb-8 overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl shadow-black/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300">
                 <iframe key={videoId} src={playerSrc} title={selectedVideo?.title || "Initial video preview"} className="aspect-video w-full" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerPolicy="origin" allowFullScreen />
                 {selectedVideo?.title && <p className="px-4 py-3 text-sm font-medium text-white">{selectedVideo.title}</p>}
               </div>
@@ -162,7 +173,7 @@ export default function Home() {
               isHost
               onSelectVideo={(url, video) => {
                 setVideoUrl(url);
-                setSelectedVideo({ id: video.id, title: video.title });
+                setSelectedVideo(video);
                 setHostError("");
               }}
             />

@@ -24,8 +24,8 @@ async function postJson(path, payload) {
   return data;
 }
 
-export function createParty({ hostName, videoUrl }) {
-  return postJson("/api/parties", { hostName, videoUrl });
+export function createParty({ hostName, videoUrl, videoDetails }) {
+  return postJson("/api/parties", { hostName, videoUrl, videoDetails });
 }
 
 export function joinParty({ name, partyCode }) {

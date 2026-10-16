@@ -37,6 +37,16 @@ const partySchema = new mongoose.Schema(
         message: "A party must have at least one video URL.",
       },
     },
+    video_details: {
+      type: [{
+        url: { type: String, required: true, trim: true },
+        video_id: { type: String, required: true, trim: true },
+        title: { type: String, required: true, trim: true, maxlength: 200 },
+        thumbnail: { type: String, trim: true, maxlength: 2048 },
+        channel_name: { type: String, trim: true, maxlength: 120 },
+      }],
+      default: [],
+    },
     playlist_version: { type: Number, default: 0, min: 0 },
   },
   { timestamps: true, collection: "parties" },
@@ -48,6 +58,7 @@ if (mongoose.models.Party && (
   mongoose.models.Party.schema.path("active_video_url") ||
   mongoose.models.Party.schema.path("playback") ||
   !mongoose.models.Party.schema.path("playlist_version") ||
+  !mongoose.models.Party.schema.path("video_details") ||
   !mongoose.models.Party.schema.path("host_session_id") ||
   !mongoose.models.Party.schema.path("viewer_sessions")
 )) {

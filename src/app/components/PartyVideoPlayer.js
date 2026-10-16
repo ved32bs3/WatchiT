@@ -1,6 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import {
+  PLAYBACK_SYNC_INTERVAL_MS,
+  PlaybackDriftPolicy,
+  applyPlaybackCorrection,
+  measurePlaybackDrift,
+  nearestSupportedPlaybackRate,
+} from "@/app/lib/playback-sync.mjs";
 
 let youtubeApiPromise;
 
@@ -24,15 +31,27 @@ function loadYouTubeApi() {
   return youtubeApiPromise;
 }
 
-export default function PartyVideoPlayer({ videoId, videoUrl, isHost, playback, autoplayOnSelection = false, onHostPlaybackChange }) {
+export default function PartyVideoPlayer({ videoId, videoUrl, isHost, playback, serverClockOffsetMs = 0, autoplayOnSelection = false, onHostPlaybackChange }) {
   const mountRef = useRef(null);
+  const metricsRef = useRef(null);
   const playerRef = useRef(null);
   const callbackRef = useRef(onHostPlaybackChange);
+  const playbackRef = useRef(playback);
+  const clockOffsetRef = useRef(0);
+  const playerStateRef = useRef(-1);
+  const policyRef = useRef(new PlaybackDriftPolicy());
+  const lastTransportCommandRef = useRef({ action: "", at: 0, revision: -1 });
+  const lastRateCommandRef = useRef(0);
+  const correctionCountRef = useRef(0);
   const [isReady, setIsReady] = useState(false);
   const [playerError, setPlayerError] = useState("");
   const [soundEnabled, setSoundEnabled] = useState(false);
 
   useEffect(() => { callbackRef.current = onHostPlaybackChange; }, [onHostPlaybackChange]);
+  useEffect(() => {
+    playbackRef.current = playback;
+    clockOffsetRef.current = serverClockOffsetMs;
+  }, [playback, serverClockOffsetMs]);
 
   useEffect(() => {
     let cancelled = false;
@@ -56,20 +75,17 @@ export default function PartyVideoPlayer({ videoId, videoUrl, isHost, playback, 
         },
         events: {
           onReady: (event) => {
-            console.log("[WatchiT player]", {
-              isHost,
-              controls: isHost ? 1 : 0,
-              videoId,
-            });
             if (cancelled) return;
             const iframe = event.target.getIframe();
             iframe.setAttribute("tabindex", isHost ? "0" : "-1");
             iframe.setAttribute("title", isHost ? "Host video player" : "Party video, controls disabled for viewers");
             if (!isHost) event.target.mute();
             if (isHost && autoplayOnSelection) event.target.playVideo();
+            playerStateRef.current = event.target.getPlayerState();
             setIsReady(true);
           },
           onStateChange: (event) => {
+            playerStateRef.current = event.data;
             if (!isHost || ![0, 1, 2].includes(event.data)) return;
             callbackRef.current?.({
               videoUrl,
@@ -116,26 +132,134 @@ export default function PartyVideoPlayer({ videoId, videoUrl, isHost, playback, 
   }, [isHost, isReady, videoUrl]);
 
   useEffect(() => {
-    const player = playerRef.current;
-    if (!isReady || !player || !playback) return;
+    if (!isReady) return undefined;
 
-    const elapsed = playback.isPlaying
-      ? Math.max(0, (Date.now() - new Date(playback.updatedAt).getTime()) / 1000) * playback.playbackRate
-      : 0;
-    const expectedPosition = playback.positionSeconds + elapsed;
-    const currentPosition = player.getCurrentTime();
-    if (Number.isFinite(currentPosition) && Math.abs(currentPosition - expectedPosition) > 1.5) {
-      player.seekTo(expectedPosition, true);
-    }
-    if (player.getPlaybackRate() !== playback.playbackRate) player.setPlaybackRate(playback.playbackRate);
-    if (playback.isPlaying && player.getPlayerState() !== 1) player.playVideo();
-    if (!playback.isPlaying && player.getPlayerState() !== 2 && player.getPlayerState() !== 5) player.pauseVideo();
-  }, [isHost, isReady, videoId, playback]);
+    const timer = window.setInterval(() => {
+      const player = playerRef.current;
+      const metrics = metricsRef.current;
+      const currentPlayback = playbackRef.current;
+      if (!player || !metrics || !currentPlayback) return;
+
+      const now = Date.now();
+      let playerState;
+      let currentPosition;
+      let currentRate;
+      try {
+        playerState = player.getPlayerState();
+        currentPosition = player.getCurrentTime();
+        currentRate = player.getPlaybackRate();
+      } catch {
+        metrics.dataset.syncStatus = "player-unavailable";
+        return;
+      }
+      playerStateRef.current = playerState;
+      const measured = measurePlaybackDrift(currentPlayback, currentPosition, now, clockOffsetRef.current);
+      if (!measured) return;
+
+      metrics.dataset.syncCurrent = currentPosition.toFixed(3);
+      metrics.dataset.syncExpected = measured.expectedPosition.toFixed(3);
+      metrics.dataset.syncDrift = measured.driftSeconds.toFixed(3);
+      metrics.dataset.syncPlayerState = String(playerState);
+      metrics.dataset.syncPropagationLatencyMs = Number.isFinite(currentPlayback.clientReceivedAt)
+        ? String(Math.round(currentPlayback.clientReceivedAt + clockOffsetRef.current - new Date(currentPlayback.updatedAt).getTime()))
+        : "";
+
+      if (isHost) {
+        metrics.dataset.syncStatus = "host-authoritative";
+        return;
+      }
+
+      const isBuffering = playerState === 3;
+      if (isBuffering) {
+        metrics.dataset.syncStatus = "buffering";
+        policyRef.current.evaluate({
+          ...measured,
+          nowMs: now,
+          isReady,
+          isHost,
+          isBuffering: true,
+          transportAligned: false,
+        });
+        return;
+      }
+
+      const targetRate = Number.isFinite(currentPlayback.playbackRate) ? currentPlayback.playbackRate : 1;
+      const availableRates = player.getAvailablePlaybackRates?.() ?? [];
+      const effectiveRate = nearestSupportedPlaybackRate(targetRate, availableRates);
+      const rateMismatch = Math.abs(effectiveRate - targetRate) > 0.01;
+      if (Math.abs(currentRate - effectiveRate) > 0.01) {
+        if (now - lastRateCommandRef.current >= 1000) {
+          player.setPlaybackRate(effectiveRate);
+          lastRateCommandRef.current = now;
+        }
+        metrics.dataset.syncStatus = rateMismatch ? "setting-nearest-playback-rate" : "setting-playback-rate";
+        return;
+      }
+
+      const pausedStates = [0, 2, 5];
+      const transportAligned = currentPlayback.isPlaying
+        ? playerState === 1
+        : pausedStates.includes(playerState);
+      const requestedAction = currentPlayback.isPlaying ? "play" : "pause";
+      if (!transportAligned) {
+        const lastCommand = lastTransportCommandRef.current;
+        if (lastCommand.action !== requestedAction || lastCommand.revision !== currentPlayback.revision || now - lastCommand.at >= 1500) {
+          if (currentPlayback.isPlaying) player.playVideo();
+          else player.pauseVideo();
+          lastTransportCommandRef.current = { action: requestedAction, at: now, revision: currentPlayback.revision };
+        }
+        metrics.dataset.syncStatus = `setting-${requestedAction}`;
+        return;
+      }
+
+      const result = policyRef.current.evaluate({
+        ...measured,
+        nowMs: now,
+        isReady,
+        isHost,
+        isBuffering: false,
+        transportAligned,
+      });
+      metrics.dataset.syncStatus = result.action === "seek"
+        ? "correcting"
+        : result.action === "settled" || result.action === "aligned"
+          ? rateMismatch ? "playback-rate-limited" : "aligned"
+          : result.reason || result.action;
+
+      if (result.action === "seek") {
+        try {
+          if (applyPlaybackCorrection(player, result)) {
+            if (!currentPlayback.isPlaying) player.pauseVideo();
+            correctionCountRef.current += 1;
+            metrics.dataset.syncCorrectionCount = String(correctionCountRef.current);
+            metrics.dataset.syncLastCorrectionDrift = result.driftSeconds.toFixed(3);
+          }
+        } catch {
+          metrics.dataset.syncStatus = "seek-request-failed";
+        }
+      } else if (result.action === "settled") {
+        metrics.dataset.syncLastPostCorrectionDrift = result.driftSeconds.toFixed(3);
+      } else if (result.action === "failed") {
+        metrics.dataset.syncLastPostCorrectionDrift = result.driftSeconds.toFixed(3);
+      }
+    }, PLAYBACK_SYNC_INTERVAL_MS);
+
+    return () => window.clearInterval(timer);
+  }, [isHost, isReady, videoId]);
 
   return (
     <section aria-label="Party video player">
       <div className="relative aspect-video overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl shadow-black/40">
-        <div ref={mountRef} className="absolute inset-0 h-full w-full" />
+        <div
+          ref={metricsRef}
+          data-sync-role={isHost ? "host" : "viewer"}
+          data-sync-status="initializing"
+          data-sync-correction-count="0"
+          className="absolute inset-0"
+          aria-live="off"
+        >
+          <div ref={mountRef} className="absolute inset-0 h-full w-full" />
+        </div>
         {!isHost && <div aria-hidden="true" className="absolute inset-0 z-10 cursor-default" onContextMenu={(event) => event.preventDefault()} />}
         {playerError && <div role="alert" className="absolute inset-x-4 bottom-4 z-20 rounded-xl bg-zinc-950/90 px-4 py-3 text-sm text-rose-200">{playerError}</div>}
       </div>

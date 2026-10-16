@@ -43,6 +43,33 @@ function publicPoll(poll, myVote = null) {
   };
 }
 
+function restorePoll(saved) {
+  if (!saved?.id || !Array.isArray(saved.pollParams)) return null;
+  return {
+    id: saved.id,
+    title: saved.description,
+    options: saved.pollParams.map((option) => ({ id: option.option_id, text: option.value, votes: option.votes })),
+    votes: new Map((saved.voters ?? []).map((voter) => [voter.participant_id, voter.option_id])),
+    isOpen: saved.isOpen,
+    createdAt: new Date(saved.createdAt).getTime(),
+    closedAt: saved.closedAt ? new Date(saved.closedAt).getTime() : null,
+    revision: saved.revision ?? 0,
+  };
+}
+
+function savePoll(poll) {
+  return {
+    id: poll.id,
+    description: poll.title,
+    pollParams: poll.options.map(({ id, text, votes }) => ({ option_id: id, value: text, votes })),
+    voters: [...poll.votes].map(([participantId, optionId]) => ({ participant_id: participantId, option_id: optionId })),
+    isOpen: poll.isOpen,
+    createdAt: new Date(poll.createdAt),
+    closedAt: poll.closedAt ? new Date(poll.closedAt) : null,
+    revision: poll.revision,
+  };
+}
+
 function isValidYouTubeUrl(value) {
   if (typeof value !== "string" || value.length > 2048) return false;
   try {
@@ -91,7 +118,7 @@ async function broadcastPresence(io, code) {
 
 async function getOrCreateSnapshot(code) {
   await connectDb();
-  const party = await Party.findOne({ party_code: Number(code) }).select({ video_urls: 1, playlist_version: 1 }).lean();
+  const party = await Party.findOne({ party_code: Number(code) }).select({ video_urls: 1, video_details: 1, playlist_version: 1 }).lean();
   if (!party) return null;
 
   let snapshot = snapshots.get(code);
@@ -108,7 +135,11 @@ async function getOrCreateSnapshot(code) {
   }
   return {
     snapshot,
-    playlist: { videoUrls: party.video_urls ?? [], playlistVersion: party.playlist_version ?? 0 },
+    playlist: {
+      videoUrls: party.video_urls ?? [],
+      videoDetails: (party.video_details ?? []).map((video) => ({ url: video.url, id: video.video_id, title: video.title, thumbnail: video.thumbnail, channelName: video.channel_name })),
+      playlistVersion: party.playlist_version ?? 0,
+    },
   };
 }
 
@@ -190,13 +221,23 @@ export function attachWatchPartySockets(io) {
         socket.data.joinedRoom = room;
         socket.emit("party:state", roomState.snapshot);
         socket.emit("party:playlist", roomState.playlist);
-        const poll = activePolls.get(code);
+        let poll = activePolls.get(code);
+        if (!poll) {
+          const chat = await Chat.findOne({ party_code: Number(code) }).select({ poll: 1 }).lean();
+          poll = restorePoll(chat?.poll);
+          if (poll) activePolls.set(code, poll);
+        }
         if (poll) {
           const participantId = socket.data.participant.participantId ?? `${socket.data.participant.role}:${socket.data.participant.name}`;
           socket.emit("party:poll-state", publicPoll(poll, poll.votes.get(participantId) ?? null));
         }
         await broadcastPresence(io, code);
-        if (typeof acknowledge === "function") acknowledge({ ok: true, state: roomState.snapshot, playlist: roomState.playlist });
+        if (typeof acknowledge === "function") acknowledge({
+          ok: true,
+          state: roomState.snapshot,
+          playlist: roomState.playlist,
+          serverTime: Date.now(),
+        });
       } catch (error) {
         console.error("Socket party join failed:", error.message);
         reject(socket, acknowledge, "Could not load this party's live state.");
@@ -262,12 +303,16 @@ export function attachWatchPartySockets(io) {
       try {
         await connectDb();
         const party = await Party.findOne({ party_code: Number(code) })
-          .select({ video_urls: 1, playlist_version: 1 }).lean();
+          .select({ video_urls: 1, video_details: 1, playlist_version: 1 }).lean();
         if (!party) {
           reject(socket, acknowledge, "Party not found.");
           return;
         }
-        const playlist = { videoUrls: party.video_urls ?? [], playlistVersion: party.playlist_version ?? 0 };
+        const playlist = {
+          videoUrls: party.video_urls ?? [],
+          videoDetails: (party.video_details ?? []).map((video) => ({ url: video.url, id: video.video_id, title: video.title, thumbnail: video.thumbnail, channelName: video.channel_name })),
+          playlistVersion: party.playlist_version ?? 0,
+        };
         io.to(room).emit("party:playlist", playlist);
 
         const current = snapshots.get(code);
@@ -454,7 +499,7 @@ export function attachWatchPartySockets(io) {
       }
     });
 
-    socket.on("party:poll-create", (payload, acknowledge) => {
+    socket.on("party:poll-create", async (payload, acknowledge) => {
       if (!isCurrentHost(socket, code) || socket.data.joinedRoom !== room) {
         reject(socket, acknowledge, "Only the active host can create a room poll.");
         return;
@@ -464,7 +509,19 @@ export function attachWatchPartySockets(io) {
         reject(socket, acknowledge, "A poll needs a title and two to six unique options.");
         return;
       }
-      const existing = activePolls.get(code);
+      let existing = activePolls.get(code);
+      if (!existing) {
+        try {
+          await connectDb();
+          const chat = await Chat.findOne({ party_code: Number(code) }).select({ poll: 1 }).lean();
+          existing = restorePoll(chat?.poll);
+          if (existing) activePolls.set(code, existing);
+        } catch (error) {
+          console.error("Party poll lookup failed:", error.message);
+          reject(socket, acknowledge, "Could not load the current poll. Please try again.");
+          return;
+        }
+      }
       if (existing?.isOpen) {
         reject(socket, acknowledge, "Close the current poll before creating another.");
         return;
@@ -479,18 +536,37 @@ export function attachWatchPartySockets(io) {
         closedAt: null,
         revision: 0,
       };
+      try {
+        await connectDb();
+        const saved = await Chat.findOneAndUpdate(
+          {
+            party_code: Number(code),
+            $or: [{ poll: null }, { "poll.isOpen": false }, { poll: { $exists: false } }],
+          },
+          { $set: { poll: savePoll(poll) } },
+          { new: true, runValidators: true },
+        ).select({ poll: 1 }).lean();
+        if (!saved) {
+          reject(socket, acknowledge, "Close the current poll before creating another.");
+          return;
+        }
+      } catch (error) {
+        console.error("Party poll save failed:", error.message);
+        reject(socket, acknowledge, "Could not save the poll. Please try again.");
+        return;
+      }
       activePolls.set(code, poll);
       const state = publicPoll(poll);
       io.to(room).emit("party:poll-state", state);
       if (typeof acknowledge === "function") acknowledge({ ok: true, poll: { ...state, myVote: null } });
     });
 
-    socket.on("party:poll-vote", (payload, acknowledge) => {
+    socket.on("party:poll-vote", async (payload, acknowledge) => {
       if (socket.data.joinedRoom !== room) {
         reject(socket, acknowledge, "Join the party before voting.");
         return;
       }
-      const poll = activePolls.get(code);
+      let poll = activePolls.get(code);
       const option = poll?.options.find((entry) => entry.id === payload?.optionId);
       const pollId = typeof payload?.pollId === "string" ? payload.pollId : "";
       const participantId = socket.data.participant.participantId ?? `${socket.data.participant.role}:${socket.data.participant.name}`;
@@ -502,27 +578,71 @@ export function attachWatchPartySockets(io) {
         reject(socket, acknowledge, "You have already voted in this poll.");
         return;
       }
-      poll.votes.set(participantId, option.id);
-      option.votes += 1;
-      poll.revision += 1;
+      try {
+        await connectDb();
+        const saved = await Chat.findOneAndUpdate(
+          {
+            party_code: Number(code),
+            "poll.id": poll.id,
+            "poll.isOpen": true,
+            "poll.pollParams.option_id": option.id,
+            "poll.voters.participant_id": { $ne: participantId },
+          },
+          {
+            $inc: { "poll.pollParams.$[choice].votes": 1, "poll.revision": 1 },
+            $push: { "poll.voters": { participant_id: participantId, option_id: option.id } },
+          },
+          { new: true, runValidators: true, arrayFilters: [{ "choice.option_id": option.id }] },
+        ).select({ poll: 1 }).lean();
+        if (!saved) {
+          const latest = await Chat.findOne({ party_code: Number(code) }).select({ poll: 1 }).lean();
+          const latestPoll = restorePoll(latest?.poll);
+          if (latestPoll) activePolls.set(code, latestPoll);
+          reject(socket, acknowledge, latestPoll?.votes.has(participantId)
+            ? "You have already voted in this poll."
+            : "This poll is closed or the selected option is invalid.");
+          return;
+        }
+        poll = restorePoll(saved.poll);
+        activePolls.set(code, poll);
+      } catch (error) {
+        console.error("Party poll vote save failed:", error.message);
+        reject(socket, acknowledge, "Could not save your vote. Please try again.");
+        return;
+      }
       const state = publicPoll(poll);
       io.to(room).emit("party:poll-state", state);
       if (typeof acknowledge === "function") acknowledge({ ok: true, poll: { ...state, myVote: option.id } });
     });
 
-    socket.on("party:poll-close", (payload, acknowledge) => {
+    socket.on("party:poll-close", async (payload, acknowledge) => {
       if (!isCurrentHost(socket, code) || socket.data.joinedRoom !== room) {
         reject(socket, acknowledge, "Only the active host can close this poll.");
         return;
       }
-      const poll = activePolls.get(code);
+      let poll = activePolls.get(code);
       if (!poll || poll.id !== payload?.pollId || !poll.isOpen) {
         reject(socket, acknowledge, "This poll is already closed or no longer active.");
         return;
       }
-      poll.isOpen = false;
-      poll.closedAt = Date.now();
-      poll.revision += 1;
+      try {
+        await connectDb();
+        const saved = await Chat.findOneAndUpdate(
+          { party_code: Number(code), "poll.id": poll.id, "poll.isOpen": true },
+          { $set: { "poll.isOpen": false, "poll.closedAt": new Date() }, $inc: { "poll.revision": 1 } },
+          { new: true, runValidators: true },
+        ).select({ poll: 1 }).lean();
+        if (!saved) {
+          reject(socket, acknowledge, "This poll is already closed or no longer active.");
+          return;
+        }
+        poll = restorePoll(saved.poll);
+        activePolls.set(code, poll);
+      } catch (error) {
+        console.error("Party poll close failed:", error.message);
+        reject(socket, acknowledge, "Could not close the poll. Please try again.");
+        return;
+      }
       const state = publicPoll(poll);
       io.to(room).emit("party:poll-state", state);
       if (typeof acknowledge === "function") acknowledge({ ok: true, poll: state });

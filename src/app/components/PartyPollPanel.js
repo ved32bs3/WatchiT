@@ -75,7 +75,7 @@ export default function PartyPollPanel({ isHost, socket, socketStatus }) {
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-rose-300">Live room poll</p>
           <h2 id="poll-title" className="mt-2 text-xl font-semibold">Choose together</h2>
-          <p className="mt-1 text-sm text-zinc-400">Votes are temporary and reset when the realtime server restarts.</p>
+          <p className="mt-1 text-sm text-zinc-400">Each party member, including the host, can vote once. Polls are saved with the party chat.</p>
         </div>
         {poll && <span className={`rounded-full px-3 py-1 text-xs ${poll.isOpen ? "bg-emerald-400/10 text-emerald-200" : "bg-white/10 text-zinc-300"}`}>{poll.isOpen ? "Open" : "Closed"}</span>}
       </div>

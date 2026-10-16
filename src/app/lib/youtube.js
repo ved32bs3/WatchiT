@@ -28,3 +28,32 @@ export function getYouTubeConfig() {
   if (!/^[A-Z]{2}$/.test(regionCode)) return { error: "YOUTUBE_REGION_CODE must be a two-letter country code." };
   return { apiKey, regionCode };
 }
+
+export async function getYouTubeVideoDetails(videoUrl, videoId) {
+  const params = new URLSearchParams({ url: videoUrl, format: "json" });
+  try {
+    const response = await fetch(`https://www.youtube.com/oembed?${params}`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!response.ok) return null;
+    const payload = await response.json();
+    if (typeof payload.title !== "string" || !payload.title.trim()) return null;
+
+    let thumbnail = "";
+    try {
+      const image = new URL(payload.thumbnail_url);
+      if (image.protocol === "https:" && ["i.ytimg.com", "yt3.ggpht.com"].includes(image.hostname)) thumbnail = image.href;
+    } catch {}
+
+    return {
+      url: videoUrl,
+      video_id: videoId,
+      title: payload.title.trim().slice(0, 200),
+      thumbnail,
+      channel_name: typeof payload.author_name === "string" ? payload.author_name.trim().slice(0, 120) : "",
+    };
+  } catch {
+    return null;
+  }
+}

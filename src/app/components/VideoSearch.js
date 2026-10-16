@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 
-export default function VideoSearch({ isHost = false, onSelectVideo }) {
+export default function VideoSearch({ isHost = false, onSelectVideo, onAddToPlaylist }) {
   const [query, setQuery] = useState("");
   const [videos, setVideos] = useState([]);
   const [error, setError] = useState("");
@@ -175,13 +175,24 @@ export default function VideoSearch({ isHost = false, onSelectVideo }) {
                 <div className="p-4">
                   <h3 className="line-clamp-2 min-h-10 text-sm font-medium leading-5 text-white">{video.title}</h3>
                   <p className="mt-1 truncate text-xs text-zinc-400">{video.channelName}</p>
-                  <button
-                    type="button"
-                    onClick={() => onSelectVideo?.(video.url, video)}
-                    className="mt-4 min-h-10 w-full rounded-lg border border-rose-400/30 bg-rose-400/10 px-3 text-sm font-medium text-rose-200 transition hover:bg-rose-400/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300"
-                  >
-                    Play video
-                  </button>
+                  <div className={`mt-4 grid gap-2 ${onAddToPlaylist ? "sm:grid-cols-2" : "grid-cols-1"}`}>
+                    <button
+                      type="button"
+                      onClick={() => onSelectVideo?.(video.url, video)}
+                      className="min-h-10 w-full rounded-lg border border-rose-400/30 bg-rose-400/10 px-3 text-sm font-medium text-rose-200 transition hover:bg-rose-400/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300"
+                    >
+                      {onAddToPlaylist ? "Play video" : "Select Video"}
+                    </button>
+                    {onAddToPlaylist && (
+                      <button
+                        type="button"
+                        onClick={() => onAddToPlaylist(video.url, video)}
+                        className="min-h-10 w-full rounded-lg border border-white/15 bg-white/[0.06] px-3 text-sm font-medium text-zinc-100 transition hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300"
+                      >
+                        Add to Playlist
+                      </button>
+                    )}
+                  </div>
                 </div>
               </li>
             ))}

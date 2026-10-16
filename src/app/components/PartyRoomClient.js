@@ -7,7 +7,9 @@ import { io } from "socket.io-client";
 import { movePlaylistItem } from "@/app/lib/playlist-utils.mjs";
 import PartyVideoPlayer from "@/app/components/PartyVideoPlayer";
 import PartyChatPanel from "@/app/components/PartyChatPanel";
+import PartyPollPanel from "@/app/components/PartyPollPanel";
 import VideoSearch from "@/app/components/VideoSearch";
+import Image from "next/image";
 import { clearPartySession, getYouTubeVideoId, partyRequest } from "@/app/lib/partyApi";
 
 const QUICK_REACTIONS = [
@@ -44,6 +46,7 @@ export default function PartyRoom() {
   const [liveParticipants, setLiveParticipants] = useState(null);
   const [reactions, setReactions] = useState([]);
   const [socketStatus, setSocketStatus] = useState("connecting");
+  const [serverClockOffsetMs, setServerClockOffsetMs] = useState(0);
   const [error, setError] = useState("");
   const [videoError, setVideoError] = useState("");
   const [isChangingVideo, setIsChangingVideo] = useState(false);
@@ -111,15 +114,20 @@ export default function PartyRoom() {
         lastSocketVideoUrl.current = snapshot.videoUrl;
         setAutoplayVideoId(participantRole === "host" && snapshot.isPlaying ? getYouTubeVideoId(snapshot.videoUrl) : "");
       }
-      setSocketPlayback(snapshot);
+      setSocketPlayback({ ...snapshot, clientReceivedAt: Date.now() });
     };
 
     socket.on("connect", () => {
       setSocketStatus("connecting");
       setRoomSocket(socket);
       setError("");
+      const sentAt = Date.now();
       socket.emit("party:join", { partyCode: code }, (result) => {
         if (result?.ok) {
+          if (Number.isFinite(result.serverTime)) {
+            const offset = result.serverTime - ((sentAt + Date.now()) / 2);
+            setServerClockOffsetMs(offset);
+          }
           setLiveState(result.state);
           if (result.playlist) {
             setRoom((current) => current ? {
@@ -127,6 +135,7 @@ export default function PartyRoom() {
               party: {
                 ...current.party,
                 videoUrls: result.playlist.videoUrls,
+                videoDetails: result.playlist.videoDetails ?? current.party.videoDetails ?? [],
                 playlistVersion: result.playlist.playlistVersion,
               },
             } : current);
@@ -153,6 +162,7 @@ export default function PartyRoom() {
         party: {
           ...current.party,
           videoUrls: playlist.videoUrls,
+          videoDetails: playlist.videoDetails ?? current.party.videoDetails ?? [],
           playlistVersion: playlist.playlistVersion,
         },
       } : current);
@@ -247,7 +257,7 @@ export default function PartyRoom() {
     return data.party;
   }, [code, room?.party?.playlistVersion, socketStatus]);
 
-  const chooseActiveVideo = useCallback(async (url) => {
+  const chooseActiveVideo = useCallback(async (url, videoDetails) => {
     const socket = socketRef.current;
     if (!socket?.connected) {
       setVideoError("Wait for the realtime connection before changing the video.");
@@ -258,7 +268,7 @@ export default function PartyRoom() {
     setVideoError("");
     try {
       if (!room?.party?.videoUrls?.includes(url)) {
-        await commitPlaylistChange("add", { videoUrl: url });
+        await commitPlaylistChange("add", { videoUrl: url, videoDetails });
       }
 
       if (!socket.connected) throw new Error("Realtime connection dropped. The video was added to the party list; select it again when reconnected.");
@@ -275,6 +285,22 @@ export default function PartyRoom() {
       setIsChangingVideo(false);
     }
   }, [commitPlaylistChange, room]);
+
+  const addVideoToPlaylist = useCallback(async (url, videoDetails) => {
+    if (room?.party?.videoUrls?.includes(url)) {
+      setVideoError("That video is already in the playlist.");
+      return;
+    }
+    setIsChangingVideo(true);
+    setVideoError("");
+    try {
+      await commitPlaylistChange("add", { videoUrl: url, videoDetails });
+    } catch (changeError) {
+      setVideoError(changeError.message || "Could not add the video to the playlist.");
+    } finally {
+      setIsChangingVideo(false);
+    }
+  }, [commitPlaylistChange, room?.party?.videoUrls]);
 
   async function removePlaylistVideo(url) {
     setIsChangingVideo(true);
@@ -433,6 +459,7 @@ export default function PartyRoom() {
               videoUrl={videoUrl}
               isHost={isHost}
               playback={playback}
+              serverClockOffsetMs={serverClockOffsetMs}
               autoplayOnSelection={autoplayVideoId === videoId}
               onHostPlaybackChange={isHost ? emitHostPlayback : undefined}
             />
@@ -477,6 +504,7 @@ export default function PartyRoom() {
             </div>
           </div>
         </section>
+        <PartyPollPanel isHost={isHost} socket={roomSocket} socketStatus={socketStatus} />
           </div>
           <PartyChatPanel
             partyCode={code}
@@ -499,11 +527,15 @@ export default function PartyRoom() {
             {party.videoUrls.map((url, index) => {
               const selected = url === videoUrl;
               const videoIdForItem = getYouTubeVideoId(url);
+              const details = party.videoDetails?.find((item) => item.url === url);
+              const thumbnail = details?.thumbnail || (videoIdForItem ? `https://i.ytimg.com/vi/${videoIdForItem}/hqdefault.jpg` : "");
               return (
                 <li key={url} className={`flex flex-wrap items-center gap-3 rounded-xl border px-3 py-3 ${selected ? "border-rose-400/30 bg-rose-400/[0.08]" : "border-white/10 bg-black/10"}`}>
                   <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-white/[0.06] font-mono text-xs text-zinc-400">{index + 1}</span>
+                  {thumbnail && <Image src={thumbnail} alt="" width={160} height={90} unoptimized className="aspect-video w-28 rounded-lg object-cover" />}
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm text-white">YouTube video {videoIdForItem || ""}</p>
+                    <p className="line-clamp-2 text-sm text-white">{details?.title || `YouTube video ${videoIdForItem || ""}`}</p>
+                    {details?.channelName && <p className="mt-0.5 truncate text-xs text-zinc-400">{details.channelName}</p>}
                     <p className="mt-0.5 text-xs text-zinc-500">{selected ? "Now playing" : "In playlist"}</p>
                   </div>
                   {isHost && (
@@ -545,7 +577,11 @@ export default function PartyRoom() {
             <h2 id="room-recommendations-title" className="mt-2 text-2xl font-semibold tracking-tight">Browse movie recommendations</h2>
             <p className="mt-2 text-sm text-zinc-400">Pick a video to add it to the party library and switch playback for everyone.</p>
             <div className="mt-6">
-              <VideoSearch isHost onSelectVideo={(url) => chooseActiveVideo(url)} />
+              <VideoSearch
+                isHost
+                onSelectVideo={(url, details) => chooseActiveVideo(url, details)}
+                onAddToPlaylist={addVideoToPlaylist}
+              />
             </div>
           </section>
         )}

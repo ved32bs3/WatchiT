@@ -5,6 +5,7 @@ import Chat from "@/app/models/chat/Chat";
 import { toPublicParty } from "@/app/lib/party-utils";
 import { isActivePartyParticipant, readParticipantSession } from "@/app/lib/participant-session";
 import { isExactPlaylistPermutation, MAX_PLAYLIST_ITEMS } from "@/app/lib/playlist-utils.mjs";
+import { getYouTubeVideoDetails } from "@/app/lib/youtube";
 
 function getYouTubeId(value) {
   try {
@@ -20,6 +21,27 @@ function getYouTubeId(value) {
   } catch {
     return "";
   }
+}
+
+function normalizeVideoDetails(videoUrl, videoDetails) {
+  const videoId = getYouTubeId(videoUrl);
+  const matching = videoDetails?.id === videoId ? videoDetails : null;
+  let thumbnail = "";
+  if (typeof matching?.thumbnail === "string") {
+    try {
+      const url = new URL(matching.thumbnail);
+      if (url.protocol === "https:" && ["i.ytimg.com", "yt3.ggpht.com"].includes(url.hostname)) thumbnail = url.href;
+    } catch {}
+  }
+  return {
+    url: videoUrl,
+    video_id: videoId,
+    title: typeof matching?.title === "string" && matching.title.trim()
+      ? matching.title.trim().slice(0, 200)
+      : `YouTube video ${videoId}`,
+    thumbnail,
+    channel_name: typeof matching?.channelName === "string" ? matching.channelName.trim().slice(0, 120) : "",
+  };
 }
 
 function serviceError(error) {
@@ -38,9 +60,25 @@ export async function GET(request, { params }) {
     const party = await Party.findOne({ party_code: Number(partyCode) }).lean();
     if (!party) return NextResponse.json({ error: "Party not found." }, { status: 404 });
     const participant = readParticipantSession(request, partyCode);
+    const isParticipant = isActivePartyParticipant(party, participant);
+
+    const existingDetails = party.video_details ?? [];
+    const knownUrls = new Set(existingDetails.map((video) => video.url));
+    const missingUrls = isParticipant ? (party.video_urls ?? []).filter((url) => !knownUrls.has(url)) : [];
+    const resolvedDetails = (await Promise.all(missingUrls.map(async (url) => {
+      const videoId = getYouTubeId(url);
+      return videoId ? getYouTubeVideoDetails(url, videoId) : null;
+    }))).filter(Boolean);
+    if (resolvedDetails.length) {
+      await Party.updateOne(
+        { party_code: Number(partyCode) },
+        { $addToSet: { video_details: { $each: resolvedDetails } } },
+      );
+    }
+
     return NextResponse.json({
-      party: toPublicParty(party),
-      participant: isActivePartyParticipant(party, participant) ? participant : null,
+      party: toPublicParty({ ...party, video_details: [...existingDetails, ...resolvedDetails] }),
+      participant: isParticipant ? participant : null,
       serverTime: Date.now(),
     });
   } catch (error) {
@@ -82,6 +120,7 @@ export async function PATCH(request, { params }) {
 
     const action = body.action || (body.videoUrlToAdd ? "add" : "");
     const videoUrls = [...current.video_urls];
+    const videoDetails = [...(current.video_details ?? [])];
     const version = current.playlist_version ?? 0;
     let nextUrls;
 
@@ -101,11 +140,15 @@ export async function PATCH(request, { params }) {
         return NextResponse.json({ error: `A playlist can contain at most ${MAX_PLAYLIST_ITEMS} videos.` }, { status: 409 });
       }
       nextUrls = [...videoUrls, videoUrl];
+      const details = normalizeVideoDetails(videoUrl, body.videoDetails);
+      videoDetails.push(details);
     } else if (action === "remove") {
       const videoUrl = typeof body.videoUrl === "string" ? body.videoUrl.trim() : "";
       if (!videoUrls.includes(videoUrl)) return NextResponse.json({ error: "That video is not in the playlist." }, { status: 404 });
       if (videoUrls.length <= 1) return NextResponse.json({ error: "A party playlist must keep at least one video." }, { status: 409 });
       nextUrls = videoUrls.filter((item) => item !== videoUrl);
+      const nextDetails = videoDetails.filter((item) => item.url !== videoUrl);
+      videoDetails.splice(0, videoDetails.length, ...nextDetails);
     } else if (action === "reorder") {
       if (!isExactPlaylistPermutation(videoUrls, body.videoUrls)) {
         return NextResponse.json({ error: "Reorder must contain every current playlist video exactly once." }, { status: 400 });
@@ -114,6 +157,8 @@ export async function PATCH(request, { params }) {
       if (nextUrls.every((url, index) => url === videoUrls[index])) {
         return NextResponse.json({ party: toPublicParty(current) });
       }
+      const detailsByUrl = new Map(videoDetails.map((item) => [item.url, item]));
+      videoDetails.splice(0, videoDetails.length, ...nextUrls.map((url) => detailsByUrl.get(url)).filter(Boolean));
     } else {
       return NextResponse.json({ error: "Choose a valid playlist action." }, { status: 400 });
     }
@@ -123,7 +168,7 @@ export async function PATCH(request, { params }) {
         party_code: Number(partyCode),
         $or: [{ playlist_version: version }, { playlist_version: { $exists: false } }],
       },
-      { $set: { video_urls: nextUrls }, $inc: { playlist_version: 1 } },
+      { $set: { video_urls: nextUrls, video_details: videoDetails }, $inc: { playlist_version: 1 } },
       { new: true, runValidators: true },
     ).lean();
     if (!updated) return NextResponse.json({ error: "The playlist changed in another session. Refresh and try again." }, { status: 409 });

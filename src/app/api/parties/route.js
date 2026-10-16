@@ -46,12 +46,33 @@ export async function POST(request) {
 
   const hostName = typeof body.hostName === "string" ? body.hostName.trim() : "";
   const videoUrl = typeof body.videoUrl === "string" ? body.videoUrl.trim() : "";
+  const videoId = getYouTubeId(videoUrl);
   if (!hostName || hostName.length > 40) {
     return NextResponse.json({ error: "Host name is required and must be 40 characters or fewer." }, { status: 400 });
   }
-  if (!videoUrl || !getYouTubeId(videoUrl)) {
+  if (!videoUrl || !videoId) {
     return NextResponse.json({ error: "Provide a valid YouTube video URL." }, { status: 400 });
   }
+
+  const selectedVideo = body.videoDetails && typeof body.videoDetails === "object"
+    ? body.videoDetails
+    : null;
+  const videoDetails = selectedVideo?.id === videoId && typeof selectedVideo.title === "string"
+    ? [{
+      url: videoUrl,
+      video_id: videoId,
+      title: selectedVideo.title.trim().slice(0, 200) || `YouTube video ${videoId}`,
+      thumbnail: (() => {
+        try {
+          const thumbnail = new URL(selectedVideo.thumbnail);
+          return thumbnail.protocol === "https:" && ["i.ytimg.com", "yt3.ggpht.com"].includes(thumbnail.hostname) ? thumbnail.href : "";
+        } catch {
+          return "";
+        }
+      })(),
+      channel_name: typeof selectedVideo.channelName === "string" ? selectedVideo.channelName.trim().slice(0, 120) : "",
+    }]
+    : [];
 
   try {
     await connectDb();
@@ -69,6 +90,7 @@ export async function POST(request) {
           viewers: [],
           party_code: partyCode,
           video_urls: [videoUrl],
+          video_details: videoDetails,
           playlist_version: 0,
         });
         try {

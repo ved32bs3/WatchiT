@@ -77,6 +77,63 @@ This requires a long-running Node host. Serverless deployments are not compatibl
 with this in-memory Socket.IO setup; multiple server instances would also need a
 Socket.IO adapter and shared state store, which are not configured here.
 
+## Playback drift correction and verification
+
+The host remains authoritative. Viewers estimate the expected position from the
+latest room snapshot (`positionSeconds`, `updatedAt`, `isPlaying`, and
+`playbackRate`). On room join, the client estimates server clock offset from the
+round-trip midpoint so a late join or reconnect does not interpret server time
+as local time. A viewer samples its YouTube player every 250 ms; this work is
+local and does not send polling traffic to Socket.IO.
+
+The current correction policy is deliberately separate from its acceptance
+tolerance:
+
+- A viewer requests a seek after absolute drift reaches 0.8 seconds. Smaller
+  differences are left alone to avoid reacting to short sampling variations.
+  This threshold is provisional: the local YouTube player never reached a
+  playing state in the browser check, so its live timing noise could not be
+  measured and used to tune the trigger.
+- It does not seek while the player is buffering, before player readiness, or
+  while play/pause or playback-rate commands are still being applied.
+- It calls YouTube `seekTo(expectedPosition, true)`, pauses again when the room
+  snapshot is paused, then waits at least 1 second for the asynchronous seek to
+  settle. A measured residual of 0.5 seconds or less is considered settled.
+- A residual above 0.5 seconds can be retried after an 1.8-second cooldown,
+  with at most three seeks in one correction attempt. If those attempts do not
+  settle, the client backs off for 10 seconds rather than seeking continuously.
+- The host is not corrected by its own snapshot. This prevents a correction
+  from fighting host controls or being echoed back as a new host command.
+
+The policy tests exercise expected-position calculations, pause and rate
+handling, buffering/readiness gates, seek settling, retries, cooldowns, and a
+fake YouTube player object that records `seekTo` calls. The Socket.IO integration
+test sends 100 host snapshots and measures server-timestamp-to-viewer receipt
+latency. On 2026-10-16, with the test server and both clients on localhost, the
+sample was: **n=100, median 0 ms, p95 1 ms, max 2 ms, 0 failures**. This measures
+the local Socket.IO broadcast leg; it does not include a human control action,
+YouTube event detection, or playback rendering.
+
+A real-player browser check was also attempted on localhost in Chrome
+150.0.7871.250 using host and viewer tabs and the YouTube video
+`M7lc1UVf-VE`. After attempting playback, five viewer telemetry samples 250 ms
+apart all reported `buffering`, position 0.000 s, expected position 0.000 s,
+and zero corrections. The iframe's HTML video element reported `currentTime=0`,
+`paused=true`, `readyState=0`, and no duration. **No real seek correction
+completed, so there is no measured post-correction drift and the 500 ms
+acceptance target is not verified.** The local embed did not reach a playing
+state during this check; the host embed later reported YouTube player error 5,
+and the browser recorded aborted media requests.
+
+This limitation matters because YouTube documents that `seekTo()` may seek to
+the closest preceding keyframe when the requested portion is not already
+downloaded, and can request more media when `allowSeekAhead` is true. The
+client therefore verifies the resulting position and retries only a bounded
+number of times; YouTube buffering/keyframe behavior means a sub-500 ms result
+cannot be guaranteed for every video or network. Playback-rate changes are
+also constrained to the rates supported by the current video. See the [YouTube
+IFrame Player API reference](https://developers.google.com/youtube/iframe_api_reference#seekTo).
+
 ## YouTube video search
 
 Video search uses the YouTube Data API v3 through the server-side route
