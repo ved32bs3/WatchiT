@@ -9,6 +9,12 @@ import {
   measurePlaybackDrift,
   nearestSupportedPlaybackRate,
 } from "../src/app/lib/playback-sync.mjs";
+import {
+  calculateMaximumPairwiseDrift,
+  estimateServerClockOffset,
+  normalizeActualPlayerSample,
+  summarizeLatencies,
+} from "../src/app/lib/playback-diagnostics.mjs";
 
 test("expected position advances by authoritative playback speed and server clock offset", () => {
   const snapshot = { positionSeconds: 20, isPlaying: true, playbackRate: 1.5, updatedAt: 10_000 };
@@ -52,6 +58,19 @@ test("drift below the measured trigger does not seek; meaningful drift does", ()
   assert.equal(policy.evaluate({ ...ready, driftSeconds: DRIFT_SEEK_THRESHOLD_SECONDS }).action, "seek");
 });
 
+test("correction thresholds include measured player and clock uncertainty", () => {
+  const policy = new PlaybackDriftPolicy();
+  const ready = { expectedPosition: 30, nowMs: 5000, isReady: true, isHost: false, isBuffering: false, transportAligned: true };
+  assert.equal(policy.evaluate({ ...ready, driftSeconds: 0.9, measurementUncertaintySeconds: 0.2 }).reason, "measurement-noise-band");
+  assert.equal(policy.evaluate({ ...ready, driftSeconds: 1.1, measurementUncertaintySeconds: 0.2 }).action, "seek");
+
+  const correcting = new PlaybackDriftPolicy();
+  correcting.evaluate({ ...ready, driftSeconds: 2, measurementUncertaintySeconds: 0 });
+  const residual = correcting.evaluate({ ...ready, nowMs: 6050, driftSeconds: 0.4, measurementUncertaintySeconds: 0.2 });
+  assert.equal(residual.action, "wait");
+  assert.equal(residual.reason, "correction-cooldown");
+});
+
 test("seeks have a settle window and cooldown, then retry only when residual drift exceeds tolerance", () => {
   const policy = new PlaybackDriftPolicy();
   const evaluate = (nowMs, driftSeconds) => policy.evaluate({
@@ -65,7 +84,9 @@ test("seeks have a settle window and cooldown, then retry only when residual dri
   });
   assert.equal(evaluate(1000, 2).action, "seek");
   assert.equal(evaluate(1500, 2).reason, "seek-settling");
-  assert.equal(evaluate(2050, 0.4).action, "settled");
+  const settled = evaluate(2050, 0.4);
+  assert.equal(settled.action, "settled");
+  assert.equal(settled.correctionDurationMs, 1050);
   assert.equal(evaluate(2500, 0.79).action, "aligned");
   assert.equal(evaluate(3000, 0.9).action, "seek");
 });
@@ -112,4 +133,124 @@ test("YouTube seek API is called once for a correction and settles inside the ac
   assert.ok(Math.abs(settled.driftSeconds) <= 0.5);
   assert.equal(applyPlaybackCorrection(player, settled), false);
   assert.equal(player.seekCalls.length, 1);
+});
+
+test("clock offset uses the lowest round-trip sample and reports uncertainty", () => {
+  assert.deepEqual(estimateServerClockOffset([
+    { sentAt: 1000, receivedAt: 1100, serverTime: 1060 },
+    { sentAt: 2000, receivedAt: 2030, serverTime: 2014 },
+  ]), {
+    offsetMs: -1,
+    uncertaintyMs: 15,
+    roundTripMs: 30,
+    sampleCount: 2,
+  });
+  assert.equal(estimateServerClockOffset([]), null);
+});
+
+test("latency summaries report nearest-rank p50, p95, maximum, and sample count", () => {
+  assert.deepEqual(summarizeLatencies([8, 2, 4, -1, Number.NaN]), {
+    sampleCount: 3,
+    p50Ms: 4,
+    p95Ms: 8,
+    maxMs: 8,
+  });
+  assert.deepEqual(summarizeLatencies([]), { sampleCount: 0, p50Ms: null, p95Ms: null, maxMs: null });
+});
+
+test("actual-player samples are projected to server receive time before pairwise comparison", () => {
+  const first = normalizeActualPlayerSample({
+    clientId: "host-tab",
+    participantId: "host-session",
+    videoId: "abcdefghijk",
+    positionSeconds: 20,
+    capturedAtClientMs: 1000,
+    serverClockOffsetMs: 500,
+    clockUncertaintyMs: 20,
+    observedTimingJitterMs: 10,
+    isPlaying: true,
+    playbackRate: 1.5,
+    playerState: 1,
+    status: "ready",
+    visible: true,
+  }, 1600);
+  const second = normalizeActualPlayerSample({
+    clientId: "viewer-tab",
+    participantId: "viewer-session",
+    videoId: "abcdefghijk",
+    positionSeconds: 20.4,
+    capturedAtClientMs: 1100,
+    serverClockOffsetMs: 500,
+    clockUncertaintyMs: 20,
+    observedTimingJitterMs: 10,
+    isPlaying: true,
+    playbackRate: 1.5,
+    playerState: 1,
+    status: "ready",
+    visible: true,
+  }, 1700);
+  assert.ok(Math.abs(first.positionSeconds - 20.15) < 0.0001);
+  assert.ok(Math.abs(second.positionSeconds - 20.55) < 0.0001);
+
+  const pairwise = calculateMaximumPairwiseDrift([first, second], 1800);
+  assert.equal(pairwise.status, "measured");
+  assert.equal(pairwise.readySampleCount, 2);
+  assert.ok(Math.abs(pairwise.maxPair.driftSeconds - 0.25) < 0.0001);
+  assert.equal(pairwise.maxPair.timingUncertaintyMs, 30);
+  const jitterLimited = calculateMaximumPairwiseDrift([
+    { ...first, observedTimingJitterMs: 300 },
+    { ...second, observedTimingJitterMs: 300 },
+  ], 1800);
+  assert.equal(jitterLimited.status, "insufficient-timing-precision");
+});
+
+test("pairwise diagnostics reject samples without explicit visible-client evidence", () => {
+  const sample = {
+    clientId: "visible-tab",
+    participantId: "session-one",
+    videoId: "abcdefghijk",
+    positionSeconds: 4,
+    capturedAtClientMs: 1000,
+    serverClockOffsetMs: 0,
+    clockUncertaintyMs: 10,
+    observedTimingJitterMs: 10,
+    isPlaying: true,
+    playbackRate: 1,
+    playerState: 1,
+    status: "ready",
+  };
+  const incomplete = normalizeActualPlayerSample(sample, 1010);
+  assert.equal(incomplete.visible, false);
+  assert.equal(calculateMaximumPairwiseDrift([
+    incomplete,
+    { ...incomplete, clientId: "second-tab", visible: true },
+  ], 1020).status, "insufficient-ready-clients");
+});
+
+test("pairwise measurements report insufficient samples for buffering, stale, hidden, or uncertain clients", () => {
+  const sample = {
+    clientId: "one",
+    participantId: "session-one",
+    videoId: "abcdefghijk",
+    positionSeconds: 4,
+    serverReceivedAt: 1000,
+    isPlaying: true,
+    playbackRate: 1,
+    playerState: 3,
+    status: "buffering",
+    visible: true,
+    clockUncertaintyMs: 10,
+    observedTimingJitterMs: 10,
+  };
+  assert.deepEqual(calculateMaximumPairwiseDrift([sample], 1100), {
+    status: "insufficient-ready-clients",
+    readySampleCount: 0,
+    candidateSampleCount: 0,
+    timingPrecisionRejectedCount: 0,
+    maxPair: null,
+  });
+  assert.equal(calculateMaximumPairwiseDrift([
+    { ...sample, playerState: 1, status: "ready", clientId: "one" },
+    { ...sample, playerState: 1, status: "ready", clientId: "two", clockUncertaintyMs: 300 },
+  ], 1100).readySampleCount, 1);
 });

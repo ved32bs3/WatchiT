@@ -17,7 +17,7 @@ Open [http://localhost:3001](http://localhost:3001) with your browser to see the
 
 ## Watch-party entry flows
 
-The landing page has a host form (display name and initial YouTube URL) and a
+The landing page has a host form (display name and initial supported video URL) and a
 viewer form (display name and six-digit party code). Hosts can open movie search,
 select a recommendation to fill the initial URL, and preview it in the embedded
 player above search results.
@@ -81,10 +81,31 @@ Socket.IO adapter and shared state store, which are not configured here.
 
 The host remains authoritative. Viewers estimate the expected position from the
 latest room snapshot (`positionSeconds`, `updatedAt`, `isPlaying`, and
-`playbackRate`). On room join, the client estimates server clock offset from the
-round-trip midpoint so a late join or reconnect does not interpret server time
-as local time. A viewer samples its YouTube player every 250 ms; this work is
-local and does not send polling traffic to Socket.IO.
+`playbackRate`). On join and reconnect, the client takes five server clock
+samples and uses the lowest round-trip sample's midpoint estimate. Clock
+uncertainty is carried into diagnostics; latency samples with uncertainty above
+250 ms are excluded. The viewer drift controller samples locally every 250 ms.
+
+In development, the room's **Playback diagnostics** panel exports a JSON report.
+Playback commands carry a command ID, host send timestamp, and server acceptance
+timestamp; clients record when they process the command. It separates
+server-to-client latency from host-send-to-client processing latency. The latter
+starts when the host app submits the command, not at physical input or rendered
+video output.
+
+Each ready client sends actual `YT.Player.getCurrentTime()` samples once per
+second, including player state, playback rate, visibility, clock offset, and
+uncertainty. During stable playback, the client estimates player-time jitter
+as the 95th percentile of up to 20 residuals between consecutive 250 ms player
+samples and expected rate-based progress. The controller includes that jitter
+and clock-offset uncertainty in its seek threshold and settlement decision.
+The server projects positions to a common server timestamp and
+reports maximum pairwise drift only for fresh, visible, same-video samples from
+playing or paused players. Clock uncertainty plus observed player jitter must
+be at most 250 ms; buffering, cued, hidden, stale, and uncertain samples remain
+visible as statuses but are not used for pairwise drift. The jitter estimate is
+not a formal bound on YouTube's internal media clock. Diagnostics are bounded
+in memory, disabled in production, and not written to server logs.
 
 The current correction policy is deliberately separate from its acceptance
 tolerance:
@@ -94,36 +115,41 @@ tolerance:
   This threshold is provisional: the local YouTube player never reached a
   playing state in the browser check, so its live timing noise could not be
   measured and used to tune the trigger.
+- It waits when timing uncertainty overlaps the seek threshold and only marks a
+  correction settled when measured residual plus uncertainty is at most 0.5 s.
 - It does not seek while the player is buffering, before player readiness, or
   while play/pause or playback-rate commands are still being applied.
 - It calls YouTube `seekTo(expectedPosition, true)`, pauses again when the room
   snapshot is paused, then waits at least 1 second for the asynchronous seek to
-  settle. A measured residual of 0.5 seconds or less is considered settled.
+  settle. A measured residual plus uncertainty of 0.5 seconds or less is
+  considered settled.
 - A residual above 0.5 seconds can be retried after an 1.8-second cooldown,
   with at most three seeks in one correction attempt. If those attempts do not
   settle, the client backs off for 10 seconds rather than seeking continuously.
 - The host is not corrected by its own snapshot. This prevents a correction
   from fighting host controls or being echoed back as a new host command.
 
-The policy tests exercise expected-position calculations, pause and rate
-handling, buffering/readiness gates, seek settling, retries, cooldowns, and a
-fake YouTube player object that records `seekTo` calls. The Socket.IO integration
-test sends 100 host snapshots and measures server-timestamp-to-viewer receipt
-latency. On 2026-10-16, with the test server and both clients on localhost, the
-sample was: **n=100, median 0 ms, p95 1 ms, max 2 ms, 0 failures**. This measures
-the local Socket.IO broadcast leg; it does not include a human control action,
-YouTube event detection, or playback rendering.
+The deterministic tests cover clock-offset estimation, percentile calculations,
+time-aligned pairwise drift, stale/buffering/hidden/uncertain sample rejection,
+drift thresholds, seek settling, retries, and cooldowns. A separate integration
+test sends 100 timestamped commands between two local Socket.IO clients. On
+2026-10-17, the full local suite reported **n=100; server-to-client p50 0 ms,
+p95 0 ms, max 1 ms; host-send-to-client p50 0 ms, p95 1 ms, max 28 ms;
+estimated clock uncertainty 0 ms**. Both latency p95 values are below 250 ms
+for this local Socket.IO-client measurement. It ends when the receiving test
+client processes the state event; it does not measure React rendering or video
+output. The full automated suite passed 25 tests.
 
-A real-player browser check was also attempted on localhost in Chrome
-150.0.7871.250 using host and viewer tabs and the YouTube video
-`M7lc1UVf-VE`. After attempting playback, five viewer telemetry samples 250 ms
-apart all reported `buffering`, position 0.000 s, expected position 0.000 s,
-and zero corrections. The iframe's HTML video element reported `currentTime=0`,
-`paused=true`, `readyState=0`, and no duration. **No real seek correction
-completed, so there is no measured post-correction drift and the 500 ms
-acceptance target is not verified.** The local embed did not reach a playing
-state during this check; the host embed later reported YouTube player error 5,
-and the browser recorded aborted media requests.
+A real-player run used two separate visible Chromium browser contexts in one
+room (Chrome 150.0.7871.250, localhost, video `M7lc1UVf-VE`), with 12 paired
+position observations approximately 500 ms apart. Both contexts reported
+visible. The host player remained cued (state 5), with its media element at
+`currentTime=0`, paused, and `readyState=0`; the viewer remained buffering
+(state 3), at `currentTime=0`, with media loading errors. The diagnostics panel
+reported **0 ready clients, insufficient-ready-clients, and 0 correction
+attempts**. **No valid pairwise playback drift or post-correction drift was
+measured; the ≤500 ms acceptance target remains unverified.** The real-player
+check could not exercise a playing video in this environment.
 
 This limitation matters because YouTube documents that `seekTo()` may seek to
 the closest preceding keyframe when the requested portion is not already
@@ -133,6 +159,60 @@ number of times; YouTube buffering/keyframe behavior means a sub-500 ms result
 cannot be guaranteed for every video or network. Playback-rate changes are
 also constrained to the rates supported by the current video. See the [YouTube
 IFrame Player API reference](https://developers.google.com/youtube/iframe_api_reference#seekTo).
+
+The follow-up diagnostics check confirms the pairwise ingestion path with two
+ready-client test samples (synthetic pairwise result 0.200 s), but another
+two-tab actual-player attempt still did not produce two eligible live samples:
+the hidden host was cued and the active viewer was buffering. The real-playback
+≤500 ms criterion remains unverified. See the [playback diagnostics
+verification report](./test-results/playback-diagnostics-verification.md) for
+the exact results and repeatable browser procedure.
+
+## Movie recommendations and provider playback
+
+The movie catalog is stored in the `movies` MongoDB collection. `GET /api/movies`
+provides title/description search and category filtering; `GET /api/movies/[movieId]`
+returns one item. The room and home recommendation components read from this API
+and keep the existing YouTube search separate.
+
+The seed route is `POST /api/seed` (implemented by `src/app/api/seed/router.js`).
+Set `MOVIE_SEED_TOKEN` in the server environment and invoke it with
+Use an `Authorization: Bearer <MOVIE_SEED_TOKEN>` header. The endpoint is disabled if the token is unset or the header is invalid. It searches Internet Archive's own
+Advanced Search only for curated creator-attributed Feature Films dated
+1970–2019; it does not ingest broad search results, which can contain
+commercial movies with inaccurate rights labels. Each selected item must
+report a supported Creative Commons license in its metadata, have a creator
+and an MP4 derivative of at least 40 minutes, and respond successfully to a
+bounded `HEAD` request. Redirects are followed only over HTTPS within
+`archive.org` subdomains. Records with missing or inconsistent dates, missing
+rights/creator metadata, short runtimes, missing MP4s, or unverified playback
+are skipped; nothing is written unless at least 20 curated records pass all
+checks. After successful upserts, stale Internet Archive records are removed
+so the database reflects this catalogue. Upserts use the unique Archive item
+identifier, so rerunning the seed is idempotent.
+
+Rights, hosting, and availability are stored separately. Internet Archive
+metadata is uploader-supplied and is not a guarantee of worldwide rights or
+uninterrupted playback; the catalog displays the license link and retains that
+caveat. See [Internet Archive's movie rights
+guidance](https://archivesupport.zendesk.com/hc/en-us/articles/360017808151-Movies-and-Videos-A-Basic-Guide).
+
+The shared player supports the official YouTube IFrame API, direct HTTPS MP4,
+WebM, OGV and OGG files through HTML5 video, and the official Internet Archive
+embed for item-page URLs. Seeded movies use direct Internet Archive MP4 URLs so
+position, duration, play/pause, seek, rate and readiness can be read from the
+HTML5 player and use the existing room state/drift policy. The official Archive
+embed does not expose a supported cross-origin clock in this app; the player
+shows that synchronization limitation. Other unsupported providers are rejected
+with an explanation. The server classifies URLs but does not fetch arbitrary
+user-supplied media URLs; only the fixed YouTube oEmbed endpoint is used for
+YouTube metadata.
+
+Verification coverage is in `tests/movie-seed.test.mjs` and
+`tests/video-providers.test.mjs`. The seed tests use mocked Internet Archive
+search, metadata, and media responses and do not write to the configured
+database. A real catalog seed requires a configured `MOVIE_SEED_TOKEN`,
+database, and working network.
 
 ## YouTube video search
 

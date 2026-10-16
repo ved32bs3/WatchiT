@@ -10,6 +10,13 @@ export function toPublicParty(party) {
       title: video.title,
       thumbnail: video.thumbnail,
       channelName: video.channel_name,
+      provider: video.provider ?? "youtube",
+      playerType: video.player_type ?? "youtube-iframe",
+      releaseYear: video.release_year ?? null,
+      categories: video.categories ?? [],
+      sourcePageUrl: video.source_page_url ?? "",
+      licenseInfo: video.license_info ?? "",
+      availabilityStatus: video.availability_status ?? "unknown",
     })),
     playlistVersion: party.playlist_version ?? 0,
   };

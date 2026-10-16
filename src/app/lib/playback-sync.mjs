@@ -49,6 +49,7 @@ export class PlaybackDriftPolicy {
     this.lastSeekAt = Number.NEGATIVE_INFINITY;
     this.failedUntil = 0;
     this.attempts = 0;
+    this.incidentStartedAt = null;
   }
 
   reset() {
@@ -56,40 +57,56 @@ export class PlaybackDriftPolicy {
     this.lastSeekAt = Number.NEGATIVE_INFINITY;
     this.failedUntil = 0;
     this.attempts = 0;
+    this.incidentStartedAt = null;
   }
 
-  evaluate({ driftSeconds, expectedPosition, nowMs, isReady, isHost, isBuffering, transportAligned }) {
+  evaluate({ driftSeconds, expectedPosition, nowMs, isReady, isHost, isBuffering, transportAligned, measurementUncertaintySeconds = 0 }) {
     if (!isReady) return { action: "wait", reason: "not-ready" };
     if (isHost) return { action: "wait", reason: "host-is-authoritative" };
     if (isBuffering) return { action: "wait", reason: "buffering" };
+    if (!Number.isFinite(measurementUncertaintySeconds) || measurementUncertaintySeconds < 0) {
+      return { action: "wait", reason: "measurement-uncertainty-unavailable" };
+    }
     if (!transportAligned || !Number.isFinite(driftSeconds) || !Number.isFinite(expectedPosition)) {
       return { action: "wait", reason: "transport-not-settled" };
     }
 
     const absoluteDrift = Math.abs(driftSeconds);
+    const minimumDrift = Math.max(0, absoluteDrift - measurementUncertaintySeconds);
+    const maximumDrift = absoluteDrift + measurementUncertaintySeconds;
     if (this.pendingSeek) {
       if (nowMs - this.pendingSeek.startedAt < SEEK_SETTLE_DELAY_MS) {
         return { action: "wait", reason: "seek-settling" };
       }
-      if (absoluteDrift <= POST_SEEK_TOLERANCE_SECONDS) {
+      if (maximumDrift <= POST_SEEK_TOLERANCE_SECONDS) {
+        const correctionDurationMs = nowMs - this.incidentStartedAt;
+        const attempts = this.attempts;
         this.pendingSeek = null;
         this.attempts = 0;
-        return { action: "settled", driftSeconds };
+        this.incidentStartedAt = null;
+        return { action: "settled", driftSeconds, correctionDurationMs, attempts };
       }
       if (nowMs - this.lastSeekAt < SEEK_RETRY_COOLDOWN_MS) {
         return { action: "wait", reason: "correction-cooldown" };
       }
       if (this.attempts >= MAX_SEEK_ATTEMPTS) {
+        const correctionDurationMs = nowMs - this.incidentStartedAt;
+        const attempts = this.attempts;
         this.pendingSeek = null;
         this.attempts = 0;
+        this.incidentStartedAt = null;
         this.failedUntil = nowMs + FAILED_CORRECTION_COOLDOWN_MS;
-        return { action: "failed", driftSeconds };
+        return { action: "failed", driftSeconds, correctionDurationMs, attempts };
       }
       return this.startSeek(expectedPosition, driftSeconds, nowMs);
     }
 
     if (nowMs < this.failedUntil) return { action: "wait", reason: "failed-correction-cooldown" };
-    if (absoluteDrift < DRIFT_SEEK_THRESHOLD_SECONDS) return { action: "aligned", driftSeconds };
+    if (minimumDrift < DRIFT_SEEK_THRESHOLD_SECONDS) {
+      return maximumDrift < DRIFT_SEEK_THRESHOLD_SECONDS
+        ? { action: "aligned", driftSeconds }
+        : { action: "wait", reason: "measurement-noise-band", driftSeconds };
+    }
     if (nowMs - this.lastSeekAt < SEEK_RETRY_COOLDOWN_MS) {
       return { action: "wait", reason: "correction-cooldown" };
     }
@@ -97,6 +114,7 @@ export class PlaybackDriftPolicy {
   }
 
   startSeek(expectedPosition, driftSeconds, nowMs) {
+    if (this.incidentStartedAt === null) this.incidentStartedAt = nowMs;
     this.attempts += 1;
     this.lastSeekAt = nowMs;
     this.pendingSeek = { startedAt: nowMs, target: expectedPosition };

@@ -70,6 +70,7 @@ test("host playlist CRUD/reorder is persistent, versioned, and room-synchronized
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ hostName: "Playlist Test Host", videoUrl: firstVideo }),
   });
+
   assert.equal(create.response.status, 201, JSON.stringify(create.body));
 
   const { partyCode, sessionToken: hostToken } = create.body;
@@ -151,6 +152,49 @@ test("host playlist CRUD/reorder is persistent, versioned, and room-synchronized
     viewerSocket?.disconnect();
     await callApi(`/api/parties/${partyCode}`, {
       token: hostToken,
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "end" }),
+    }).catch(() => {});
+  }
+});
+
+test("host can switch YouTube to an Archive movie and back over Socket.IO", { timeout: 60000 }, async () => {
+  const archiveMovie = "https://archive.org/download/night-film/night.ia.mp4";
+  const create = await callApi("/api/parties", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ hostName: "Provider Switch Host", videoUrl: firstVideo }),
+  });
+  assert.equal(create.response.status, 201, JSON.stringify(create.body));
+
+  const { partyCode, sessionToken } = create.body;
+  let hostSocket;
+  try {
+    ({ socket: hostSocket } = await connectAndJoin(partyCode, sessionToken));
+    const addMovie = await callApi(`/api/parties/${partyCode}`, {
+      token: sessionToken,
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "add", videoUrl: archiveMovie, expectedVersion: 0 }),
+    });
+    assert.equal(addMovie.response.status, 200, JSON.stringify(addMovie.body));
+    const playlistSync = await emitAck(hostSocket, "party:playlist-sync", {});
+    assert.equal(playlistSync.ok, true, playlistSync.error);
+
+    const movieStateEvent = waitFor(hostSocket, "party:state", (state) => state.videoUrl === archiveMovie);
+    const movieSelection = await emitAck(hostSocket, "party:video-select", { videoUrl: archiveMovie });
+    assert.equal(movieSelection.ok, true, movieSelection.error);
+    assert.equal((await movieStateEvent).videoUrl, archiveMovie);
+
+    const youtubeStateEvent = waitFor(hostSocket, "party:state", (state) => state.videoUrl === firstVideo);
+    const youtubeSelection = await emitAck(hostSocket, "party:video-select", { videoUrl: firstVideo });
+    assert.equal(youtubeSelection.ok, true, youtubeSelection.error);
+    assert.equal((await youtubeStateEvent).videoUrl, firstVideo);
+  } finally {
+    hostSocket?.disconnect();
+    await callApi(`/api/parties/${partyCode}`, {
+      token: sessionToken,
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "end" }),

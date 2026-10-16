@@ -4,6 +4,12 @@ import Party from "../app/models/party/Party.js";
 import Chat from "../app/models/chat/Chat.js";
 import { createParticipantSession, isActivePartyParticipant, verifyParticipantToken } from "../app/lib/participant-session.js";
 import { normalizePollInput } from "../app/lib/poll-utils.mjs";
+import { classifyVideoUrl } from "../app/lib/video-providers.mjs";
+import {
+  calculateMaximumPairwiseDrift,
+  normalizeActualPlayerSample,
+  summarizeLatencies,
+} from "../app/lib/playback-diagnostics.mjs";
 
 const REACTIONS = new Set(["❤️", "😂", "😮", "👏", "🔥"]);
 const PLAYBACK_RATES = new Set([0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]);
@@ -13,9 +19,115 @@ const cleanupTimers = new Map();
 const activeHostIds = new Map();
 const hostTransfersInProgress = new Set();
 const activePolls = new Map();
+const playbackDiagnostics = new Map();
 
 function roomName(partyCode) {
   return `watch-party:${partyCode}`;
+}
+
+function getPlaybackDiagnostics(code) {
+  let diagnostics = playbackDiagnostics.get(code);
+  if (!diagnostics) {
+    diagnostics = {
+      samples: new Map(),
+      serverToClientLatencies: [],
+      endToEndLatencies: [],
+      corrections: [],
+      measurementFailures: 0,
+      samplesReceived: 0,
+      lastUpdatedAt: Date.now(),
+    };
+    playbackDiagnostics.set(code, diagnostics);
+  }
+  return diagnostics;
+}
+
+function appendDiagnosticSample(list, value) {
+  list.push(value);
+  if (list.length > 500) list.splice(0, list.length - 500);
+}
+
+function buildPlaybackDiagnosticsSnapshot(code, now = Date.now()) {
+  const diagnostics = getPlaybackDiagnostics(code);
+  const samples = [...diagnostics.samples.values()];
+  const recent = samples.filter((sample) => now - sample.serverReceivedAt <= 5000);
+  const pairwise = calculateMaximumPairwiseDrift(samples, now);
+  const settled = diagnostics.corrections.filter((event) => event.type === "correction-settled");
+  const attempts = diagnostics.corrections.filter((event) => event.type === "correction-attempt");
+  const failedCorrections = diagnostics.corrections.filter((event) => event.type === "correction-failed");
+  const correctionDurations = settled.map((event) => event.correctionDurationMs).filter(Number.isFinite);
+  const postCorrectionDrifts = settled.map((event) => Math.abs(event.driftSeconds)).filter(Number.isFinite);
+  const preCorrectionDrifts = attempts.map((event) => Math.abs(event.driftSeconds)).filter(Number.isFinite);
+  const pairwisePreCorrection = attempts
+    .map((event) => event.roomPairwiseDriftSeconds)
+    .filter(Number.isFinite);
+  const pairwisePostCorrection = settled
+    .map((event) => event.roomPairwiseDriftSeconds)
+    .filter(Number.isFinite);
+  return {
+    roomId: Number(code),
+    generatedAt: now,
+    samplesReceived: diagnostics.samplesReceived,
+    pairwise,
+    participants: samples.map((sample) => ({
+      clientId: sample.clientId,
+      participantId: sample.participantId,
+      status: now - sample.serverReceivedAt > 2500 ? "stale" : sample.status,
+      playerState: sample.playerState,
+      videoId: sample.videoId,
+      sampleAgeMs: Math.max(0, now - sample.serverReceivedAt),
+      clockUncertaintyMs: sample.clockUncertaintyMs,
+      measurementUncertaintyMs: sample.clockUncertaintyMs + sample.observedTimingJitterMs,
+    })),
+    activeClients: recent.length,
+    serverToClient: summarizeLatencies(diagnostics.serverToClientLatencies),
+    endToEnd: summarizeLatencies(diagnostics.endToEndLatencies),
+    corrections: {
+      attemptCount: attempts.length,
+      settledCount: settled.length,
+      failedCount: failedCorrections.length,
+      maxPreDriftSeconds: preCorrectionDrifts.length ? Math.max(...preCorrectionDrifts) : null,
+      maxDurationMs: correctionDurations.length ? Math.max(...correctionDurations) : null,
+      maxPostDriftSeconds: postCorrectionDrifts.length ? Math.max(...postCorrectionDrifts) : null,
+      clientStatePreMeasurementCount: preCorrectionDrifts.length,
+      clientStatePostMeasurementCount: postCorrectionDrifts.length,
+      maxPairwisePreDriftSeconds: pairwisePreCorrection.length ? Math.max(...pairwisePreCorrection) : null,
+      pairwisePreMeasurementCount: pairwisePreCorrection.length,
+      maxPairwisePostDriftSeconds: pairwisePostCorrection.length ? Math.max(...pairwisePostCorrection) : null,
+      pairwisePostMeasurementCount: pairwisePostCorrection.length,
+    },
+    measurementFailures: diagnostics.measurementFailures,
+    lastUpdatedAt: diagnostics.lastUpdatedAt,
+  };
+}
+
+function publishPlaybackDiagnostics(io, code) {
+  if (process.env.NODE_ENV === "production") return;
+  io.to(roomName(code)).emit("party:diagnostics-state", buildPlaybackDiagnosticsSnapshot(code));
+}
+
+function boundedDiagnosticValue(value, limit = 160) {
+  return typeof value === "string" ? value.slice(0, limit) : "";
+}
+
+function playbackCommandMetadata(payload, acceptedAt) {
+  const clientSentAt = payload?.clientSentAt;
+  const clientClockOffsetMs = payload?.clientClockOffsetMs;
+  const origin = Number.isFinite(clientSentAt) && Number.isFinite(clientClockOffsetMs)
+    ? clientSentAt + clientClockOffsetMs
+    : acceptedAt;
+  const originWithinBounds = origin <= acceptedAt + 1000 && origin >= acceptedAt - 120_000;
+  const originMeasured = Number.isFinite(clientSentAt) && Number.isFinite(clientClockOffsetMs) && originWithinBounds;
+  const trustedOrigin = originMeasured ? origin : acceptedAt;
+  return {
+    commandId: /^[A-Za-z0-9_-]{8,80}$/.test(payload?.commandId ?? "") ? payload.commandId : randomUUID(),
+    commandSource: ["player-control", "rate-change", "video-select", "heartbeat"].includes(payload?.commandSource)
+      ? payload.commandSource
+      : "unknown",
+    acceptedAt,
+    commandOriginServerTime: trustedOrigin,
+    commandOriginMeasured: originMeasured,
+  };
 }
 
 function hostIdentity(participant, code) {
@@ -70,23 +182,6 @@ function savePoll(poll) {
   };
 }
 
-function isValidYouTubeUrl(value) {
-  if (typeof value !== "string" || value.length > 2048) return false;
-  try {
-    const url = new URL(value);
-    const host = url.hostname.toLowerCase().replace(/^www\./, "");
-    const parts = url.pathname.split("/").filter(Boolean);
-    const videoId = host === "youtu.be"
-      ? parts[0]
-      : ["youtube.com", "m.youtube.com", "youtube-nocookie.com"].includes(host)
-        ? url.searchParams.get("v") || (["embed", "shorts", "live"].includes(parts[0]) ? parts[1] : "")
-        : "";
-    return /^[A-Za-z0-9_-]{11}$/.test(videoId ?? "");
-  } catch {
-    return false;
-  }
-}
-
 function reject(socket, acknowledge, message) {
   const response = { ok: false, error: message };
   if (typeof acknowledge === "function") acknowledge(response);
@@ -137,7 +232,13 @@ async function getOrCreateSnapshot(code) {
     snapshot,
     playlist: {
       videoUrls: party.video_urls ?? [],
-      videoDetails: (party.video_details ?? []).map((video) => ({ url: video.url, id: video.video_id, title: video.title, thumbnail: video.thumbnail, channelName: video.channel_name })),
+      videoDetails: (party.video_details ?? []).map((video) => ({
+        url: video.url, id: video.video_id, title: video.title, thumbnail: video.thumbnail,
+        channelName: video.channel_name, provider: video.provider ?? "youtube",
+        playerType: video.player_type ?? "youtube-iframe", releaseYear: video.release_year ?? null,
+        categories: video.categories ?? [], sourcePageUrl: video.source_page_url ?? "",
+        licenseInfo: video.license_info ?? "", availabilityStatus: video.availability_status ?? "unknown",
+      })),
       playlistVersion: party.playlist_version ?? 0,
     },
   };
@@ -155,6 +256,7 @@ function scheduleRoomCleanup(io, code) {
     if ((io.sockets.adapter.rooms.get(roomName(code))?.size ?? 0) === 0) {
       snapshots.delete(code);
       activePolls.delete(code);
+      playbackDiagnostics.delete(code);
     }
     cleanupTimers.delete(code);
   }, EMPTY_ROOM_TTL_MS);
@@ -169,6 +271,7 @@ function endWatchPartyRoom(io, partyCode) {
   cancelRoomCleanup(code);
   snapshots.delete(code);
   activePolls.delete(code);
+  playbackDiagnostics.delete(code);
   io.to(room).emit("party:ended", { partyCode: Number(code) });
 }
 
@@ -204,6 +307,97 @@ export function attachWatchPartySockets(io) {
     const code = socket.data.partyCode;
     const room = roomName(code);
 
+    socket.on("party:clock-sync", (payload, acknowledge) => {
+      if (typeof acknowledge === "function") acknowledge({ serverTime: Date.now() });
+    });
+
+    socket.on("party:diagnostics", (payload, acknowledge) => {
+      if (process.env.NODE_ENV === "production") {
+        if (typeof acknowledge === "function") acknowledge({ ok: false, enabled: false });
+        return;
+      }
+      if (socket.data.joinedRoom !== room || !payload || typeof payload !== "object") {
+        if (typeof acknowledge === "function") acknowledge({ ok: false, error: "Join the room before reporting diagnostics." });
+        return;
+      }
+
+      const diagnostics = getPlaybackDiagnostics(code);
+      const participantId = socket.data.participant.participantId ?? `${socket.data.participant.role}:${socket.data.participant.name}`;
+      const clientId = boundedDiagnosticValue(payload.clientId, 80);
+      const now = Date.now();
+      if (!clientId) {
+        diagnostics.measurementFailures += 1;
+        publishPlaybackDiagnostics(io, code);
+        if (typeof acknowledge === "function") acknowledge({ ok: false, error: "A diagnostics client ID is required." });
+        return;
+      }
+
+      if (payload.type === "player-sample") {
+        const sample = normalizeActualPlayerSample({ ...payload, clientId, participantId }, now);
+        if (!sample) {
+          diagnostics.measurementFailures += 1;
+        } else {
+          if (!diagnostics.samples.has(clientId) && diagnostics.samples.size >= 100) {
+            diagnostics.samples.delete(diagnostics.samples.keys().next().value);
+          }
+          diagnostics.samples.set(clientId, sample);
+          diagnostics.samplesReceived += 1;
+        }
+      } else if (payload.type === "command-processed") {
+        const commandId = boundedDiagnosticValue(payload.commandId, 80);
+        if (!commandId) {
+          diagnostics.measurementFailures += 1;
+        } else {
+          const receiptKey = `${clientId}:${commandId}`;
+          diagnostics.commandReceipts ??= new Set();
+          if (!diagnostics.commandReceipts.has(receiptKey)) {
+            diagnostics.commandReceipts.add(receiptKey);
+            if (diagnostics.commandReceipts.size > 1000) diagnostics.commandReceipts.delete(diagnostics.commandReceipts.values().next().value);
+            const clockUncertaintyMs = Number.isFinite(payload.clockUncertaintyMs) ? payload.clockUncertaintyMs : Infinity;
+            if (payload.commandSource !== "heartbeat" && clockUncertaintyMs <= 250) {
+              if (Number.isFinite(payload.serverToClientMs) && payload.serverToClientMs >= 0 && payload.serverToClientMs < 120_000) {
+                appendDiagnosticSample(diagnostics.serverToClientLatencies, payload.serverToClientMs);
+              }
+              if (Number.isFinite(payload.endToEndMs) && payload.endToEndMs >= 0 && payload.endToEndMs < 120_000) {
+                appendDiagnosticSample(diagnostics.endToEndLatencies, payload.endToEndMs);
+              }
+            } else if (payload.commandSource !== "heartbeat") {
+              diagnostics.measurementFailures += 1;
+            }
+          }
+        }
+      } else if (["correction-attempt", "correction-settled", "correction-failed"].includes(payload.type)) {
+        const pairwiseAtCorrection = calculateMaximumPairwiseDrift([...diagnostics.samples.values()], now);
+        const event = {
+          type: payload.type,
+          clientId,
+          participantId,
+          commandId: boundedDiagnosticValue(payload.commandId, 80),
+          correctionId: boundedDiagnosticValue(payload.correctionId, 80),
+          attemptedAtClientMs: Number.isFinite(payload.attemptedAtClientMs) ? payload.attemptedAtClientMs : null,
+          driftSeconds: Number.isFinite(payload.driftSeconds) ? payload.driftSeconds : null,
+          correctionDurationMs: Number.isFinite(payload.correctionDurationMs) ? payload.correctionDurationMs : null,
+          roomPairwiseDriftSeconds: pairwiseAtCorrection.status === "measured"
+            ? pairwiseAtCorrection.maxPair.driftSeconds
+            : null,
+          roomPairwiseStatus: pairwiseAtCorrection.status,
+          roomPairwiseReadySampleCount: pairwiseAtCorrection.readySampleCount,
+          serverReceivedAt: now,
+        };
+        if (event.type !== "correction-attempt" && (!Number.isFinite(event.driftSeconds) || !Number.isFinite(event.correctionDurationMs))) {
+          diagnostics.measurementFailures += 1;
+        } else {
+          appendDiagnosticSample(diagnostics.corrections, event);
+        }
+      } else if (payload.type === "measurement-failure") {
+        diagnostics.measurementFailures += 1;
+      }
+
+      diagnostics.lastUpdatedAt = now;
+      publishPlaybackDiagnostics(io, code);
+      if (typeof acknowledge === "function") acknowledge({ ok: true });
+    });
+
     socket.on("party:join", async (payload, acknowledge) => {
       if (String(payload?.partyCode ?? "") !== code) {
         reject(socket, acknowledge, "You can only join the room in your signed party session.");
@@ -219,6 +413,9 @@ export function attachWatchPartySockets(io) {
         cancelRoomCleanup(code);
         await socket.join(room);
         socket.data.joinedRoom = room;
+        if (process.env.NODE_ENV !== "production") {
+          socket.emit("party:diagnostics-state", buildPlaybackDiagnosticsSnapshot(code));
+        }
         socket.emit("party:state", roomState.snapshot);
         socket.emit("party:playlist", roomState.playlist);
         let poll = activePolls.get(code);
@@ -258,8 +455,9 @@ export function attachWatchPartySockets(io) {
         reject(socket, acknowledge, "Only the host in this party can change the video.");
         return;
       }
-      if (!isValidYouTubeUrl(payload?.videoUrl)) {
-        reject(socket, acknowledge, "Choose a valid YouTube video URL.");
+      const videoSource = classifyVideoUrl(payload?.videoUrl);
+      if (videoSource.error) {
+        reject(socket, acknowledge, videoSource.error);
         return;
       }
       try {
@@ -282,13 +480,16 @@ export function attachWatchPartySockets(io) {
         reject(socket, acknowledge, "The party live state is not ready yet.");
         return;
       }
+      const acceptedAt = Date.now();
+      const commandMetadata = playbackCommandMetadata(payload, acceptedAt);
       const snapshot = {
         videoUrl: payload.videoUrl,
         isPlaying: true,
         positionSeconds: 0,
         playbackRate: 1,
-        updatedAt: Date.now(),
+        updatedAt: acceptedAt,
         revision: previous.revision + 1,
+        ...commandMetadata,
       };
       snapshots.set(code, snapshot);
       io.to(room).emit("party:state", snapshot);
@@ -310,7 +511,13 @@ export function attachWatchPartySockets(io) {
         }
         const playlist = {
           videoUrls: party.video_urls ?? [],
-          videoDetails: (party.video_details ?? []).map((video) => ({ url: video.url, id: video.video_id, title: video.title, thumbnail: video.thumbnail, channelName: video.channel_name })),
+          videoDetails: (party.video_details ?? []).map((video) => ({
+            url: video.url, id: video.video_id, title: video.title, thumbnail: video.thumbnail,
+            channelName: video.channel_name, provider: video.provider ?? "youtube",
+            playerType: video.player_type ?? "youtube-iframe", releaseYear: video.release_year ?? null,
+            categories: video.categories ?? [], sourcePageUrl: video.source_page_url ?? "",
+            licenseInfo: video.license_info ?? "", availabilityStatus: video.availability_status ?? "unknown",
+          })),
           playlistVersion: party.playlist_version ?? 0,
         };
         io.to(room).emit("party:playlist", playlist);
@@ -355,13 +562,16 @@ export function attachWatchPartySockets(io) {
         reject(socket, acknowledge, "Playback update is invalid or belongs to an older video.");
         return;
       }
+      const acceptedAt = Date.now();
+      const commandMetadata = playbackCommandMetadata(payload, acceptedAt);
       const snapshot = {
         videoUrl: previous.videoUrl,
         isPlaying: payload.isPlaying,
         positionSeconds: payload.positionSeconds,
         playbackRate: payload.playbackRate,
-        updatedAt: Date.now(),
+        updatedAt: acceptedAt,
         revision: previous.revision + 1,
+        ...commandMetadata,
       };
       snapshots.set(code, snapshot);
       io.to(room).emit("party:state", snapshot);

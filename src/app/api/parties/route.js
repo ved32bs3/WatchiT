@@ -5,6 +5,8 @@ import Party from "@/app/models/party/Party";
 import Chat from "@/app/models/chat/Chat";
 import { toPublicParty } from "@/app/lib/party-utils";
 import { createParticipantSession } from "@/app/lib/participant-session";
+import { classifyVideoUrl } from "@/app/lib/video-providers.mjs";
+import { normalizeVideoDetails } from "@/app/lib/video-details.mjs";
 
 function errorResponse(error) {
   console.error("Party API error:", error.message);
@@ -15,22 +17,6 @@ function errorResponse(error) {
     { error: "The party service is unavailable. Please try again." },
     { status: 503 }
   );
-}
-
-function getYouTubeId(value) {
-  try {
-    const url = new URL(value);
-    const host = url.hostname.toLowerCase().replace(/^www\./, "");
-    const pieces = url.pathname.split("/").filter(Boolean);
-    let id = "";
-    if (host === "youtu.be") id = pieces[0] ?? "";
-    else if (["youtube.com", "m.youtube.com", "youtube-nocookie.com"].includes(host)) {
-      id = url.searchParams.get("v") || (["embed", "shorts", "live"].includes(pieces[0]) ? pieces[1] : "");
-    } else return "";
-    return /^[A-Za-z0-9_-]{11}$/.test(id) ? id : "";
-  } catch {
-    return "";
-  }
 }
 
 export async function POST(request) {
@@ -46,33 +32,15 @@ export async function POST(request) {
 
   const hostName = typeof body.hostName === "string" ? body.hostName.trim() : "";
   const videoUrl = typeof body.videoUrl === "string" ? body.videoUrl.trim() : "";
-  const videoId = getYouTubeId(videoUrl);
+  const videoSource = classifyVideoUrl(videoUrl);
   if (!hostName || hostName.length > 40) {
     return NextResponse.json({ error: "Host name is required and must be 40 characters or fewer." }, { status: 400 });
   }
-  if (!videoUrl || !videoId) {
-    return NextResponse.json({ error: "Provide a valid YouTube video URL." }, { status: 400 });
+  if (videoSource.error) {
+    return NextResponse.json({ error: videoSource.error }, { status: 400 });
   }
-
-  const selectedVideo = body.videoDetails && typeof body.videoDetails === "object"
-    ? body.videoDetails
-    : null;
-  const videoDetails = selectedVideo?.id === videoId && typeof selectedVideo.title === "string"
-    ? [{
-      url: videoUrl,
-      video_id: videoId,
-      title: selectedVideo.title.trim().slice(0, 200) || `YouTube video ${videoId}`,
-      thumbnail: (() => {
-        try {
-          const thumbnail = new URL(selectedVideo.thumbnail);
-          return thumbnail.protocol === "https:" && ["i.ytimg.com", "yt3.ggpht.com"].includes(thumbnail.hostname) ? thumbnail.href : "";
-        } catch {
-          return "";
-        }
-      })(),
-      channel_name: typeof selectedVideo.channelName === "string" ? selectedVideo.channelName.trim().slice(0, 120) : "",
-    }]
-    : [];
+  if (!videoUrl) return NextResponse.json({ error: "Provide a supported video URL." }, { status: 400 });
+  const videoDetails = [normalizeVideoDetails(videoUrl, body.videoDetails)];
 
   try {
     await connectDb();

@@ -1,10 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import VideoSearch from "./components/VideoSearch";
-import { createParty, getYouTubeVideoId, joinParty } from "./lib/partyApi";
+import MovieRecommendations from "./components/MovieRecommendations";
+import { createParty, joinParty } from "./lib/partyApi";
+import { classifyVideoUrl } from "./lib/video-providers.mjs";
 
 const fieldClass = "mt-2 min-h-12 w-full rounded-xl border border-white/10 bg-zinc-950/70 px-4 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-rose-400 focus:ring-2 focus:ring-rose-400/20";
 const submitClass = "mt-5 min-h-12 w-full rounded-xl bg-rose-500 px-5 text-sm font-semibold text-white transition hover:bg-rose-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 disabled:cursor-wait disabled:opacity-60";
@@ -25,10 +28,11 @@ export default function Home() {
   const [isJoining, setIsJoining] = useState(false);
   const previewRef = useRef(null);
 
-  const videoId = selectedVideo?.id || getYouTubeVideoId(videoUrl.trim());
-  const playerSrc = videoId
-    ? `https://www.youtube.com/embed/${videoId}?${new URLSearchParams({ enablejsapi: "1", origin: typeof window === "undefined" ? "" : window.location.origin })}`
-    : null;
+  const videoSource = classifyVideoUrl(videoUrl.trim());
+  const videoId = videoSource.error ? "" : videoSource.id;
+  const playerSrc = videoSource.provider === "youtube"
+    ? `https://www.youtube.com/embed/${videoSource.providerVideoId}?${new URLSearchParams({ enablejsapi: "1", origin: typeof window === "undefined" ? "" : window.location.origin })}`
+    : videoSource.provider === "internet-archive" ? videoSource.playbackUrl : null;
 
   useEffect(() => {
     if (!selectedVideo) return;
@@ -45,8 +49,9 @@ export default function Home() {
     const normalizedUrl = videoUrl.trim();
     if (!normalizedName) return setHostError("Enter your name to host the party.");
     if (normalizedName.length > 40) return setHostError("Your name must be 40 characters or fewer.");
-    if (!getYouTubeVideoId(normalizedUrl)) {
-      return setHostError("Enter a valid YouTube video URL or choose a video from search.");
+    const source = classifyVideoUrl(normalizedUrl);
+    if (source.error) {
+      return setHostError(source.error);
     }
 
     setIsCreating(true);
@@ -89,8 +94,9 @@ export default function Home() {
     <main className="min-h-screen flex-1 bg-[#09090b] px-5 py-8 text-white sm:px-8 sm:py-12">
       <div className="mx-auto max-w-6xl">
         <header className="mb-14 flex items-center justify-between border-b border-white/10 pb-5">
-          <Link href="/" className="text-lg font-bold tracking-tight text-white">
-            watch<span className="text-rose-400">it</span>
+          <Link href="/" className="inline-flex items-center gap-2 text-xl font-bold tracking-tight text-white">
+            <Image src="/logo.png" alt="" width={40} height={40} className="size-10 object-contain" />
+            <span>Watch<span className="text-rose-400">iT</span></span>
           </Link>
           <span className="rounded-full border border-white/10 px-3 py-1.5 text-xs text-zinc-400">Watch together</span>
         </header>
@@ -119,11 +125,11 @@ export default function Home() {
               <div className="mt-5 flex items-center justify-between gap-3">
                 <label htmlFor="initial-video" className="text-sm font-medium text-zinc-200">First video URL</label>
                 <button type="button" onClick={() => setShowVideoSearch((visible) => !visible)} aria-expanded={showVideoSearch} aria-controls="host-video-search" className="text-xs font-medium text-rose-300 underline decoration-rose-300/40 underline-offset-4 hover:text-rose-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300">
-                  {showVideoSearch ? "Hide video search" : "Search movie videos"}
+                  {showVideoSearch ? "Hide video recommendations" : "Browse videos & free movies"}
                 </button>
               </div>
-              <input id="initial-video" name="videoUrl" type="url" inputMode="url" required value={videoUrl} onChange={(event) => { setVideoUrl(event.target.value); setSelectedVideo(null); }} placeholder="https://www.youtube.com/watch?v=..." className={fieldClass} aria-describedby="video-url-hint" />
-              <p id="video-url-hint" className="mt-1.5 text-xs text-zinc-500">Paste a YouTube URL or choose a result below.</p>
+              <input id="initial-video" name="videoUrl" type="url" inputMode="url" required value={videoUrl} onChange={(event) => { setVideoUrl(event.target.value); setSelectedVideo(null); }} placeholder="YouTube, Internet Archive, or direct MP4/WebM URL" className={fieldClass} aria-describedby="video-url-hint" />
+              <p id="video-url-hint" className="mt-1.5 text-xs text-zinc-500">Use a supported YouTube or Internet Archive URL, or a direct MP4/WebM file URL.</p>
 
               {hostError && <p role="alert" className="mt-4 rounded-xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm leading-5 text-rose-200">{hostError}</p>}
               {hostSuccess && <p role="status" className="mt-4 rounded-xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-3 text-sm leading-5 text-emerald-200">{hostSuccess}</p>}
@@ -160,7 +166,7 @@ export default function Home() {
           <section id="host-video-search" className="mt-12 border-t border-white/10 pt-9" aria-labelledby="video-discovery-heading">
             {videoId && (
               <div ref={previewRef} tabIndex={-1} className="mb-8 overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl shadow-black/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300">
-                <iframe key={videoId} src={playerSrc} title={selectedVideo?.title || "Initial video preview"} className="aspect-video w-full" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerPolicy="origin" allowFullScreen />
+                {videoSource.playerType === "html5-video" ? <video key={videoId} src={videoSource.playbackUrl} controls playsInline preload="metadata" className="aspect-video w-full" /> : <iframe key={videoId} src={playerSrc} title={selectedVideo?.title || "Initial video preview"} className="aspect-video w-full" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerPolicy="origin" allowFullScreen />}
                 {selectedVideo?.title && <p className="px-4 py-3 text-sm font-medium text-white">{selectedVideo.title}</p>}
               </div>
             )}
@@ -177,11 +183,14 @@ export default function Home() {
                 setHostError("");
               }}
             />
+            <div className="mt-12 border-t border-white/10 pt-9">
+              <MovieRecommendations onSelectMovie={(url, movie) => { setVideoUrl(url); setSelectedVideo(movie); setHostError(""); }} />
+            </div>
           </section>
         )}
 
         <footer className="mt-14 border-t border-white/10 pt-5 text-xs leading-5 text-zinc-500">
-          Video search is provided by YouTube. Create a party as host or join one with its six-digit code.
+          YouTube search and a curated Internet Archive movie catalog are available. Create a party as host or join one with its six-digit code.
         </footer>
       </div>
     </main>

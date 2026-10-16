@@ -1,0 +1,61 @@
+{
+  "runDate": "2026-10-17",
+  "timezone": "Asia/Kolkata",
+  "application": "http://localhost:3001",
+  "automated": {
+    "fullSuite": {
+      "passed": 25,
+      "failed": 0
+    },
+    "socketIoPropagation": {
+      "sampleCount": 100,
+      "serverToClientMs": {
+        "p50": 0,
+        "p95": 0,
+        "max": 1
+      },
+      "hostSendToClientMs": {
+        "p50": 0,
+        "p95": 1,
+        "max": 28
+      },
+      "estimatedClockUncertaintyMs": {
+        "host": 0,
+        "viewer": 0
+      },
+      "boundary": "Local Socket.IO test clients; excludes browser rendering and video output."
+    },
+    "pairwiseDiagnosticsIngestion": {
+      "readyClientSamples": 2,
+      "pairwiseDriftSeconds": 0.2,
+      "measurementKind": "Synthetic test positions; validates ingestion and time alignment, not actual YouTube playback."
+    }
+  },
+  "actualYouTubeBrowserAttempt": {
+    "videoId": "M7lc1UVf-VE",
+    "browser": "Chrome 150.0.7871.250",
+    "sessions": "Two tabs in the same local browser instance; the inactive tab was backgrounded.",
+    "host": {
+      "status": "backgrounded",
+      "playerState": 5
+    },
+    "viewer": {
+      "status": "buffering",
+      "playerState": 3,
+      "localNonReadySamples": 18
+    },
+    "pairwiseStatus": "insufficient-ready-clients",
+    "readyClients": 0,
+    "validPairwiseSampleCount": 0,
+    "correctionAttempts": 0,
+    "preCorrectionDriftSeconds": null,
+    "postCorrectionDriftSeconds": null,
+    "correctionDurationMs": null,
+    "measurementFailures": 0,
+    "observedNetworkErrors": [
+      "YouTube media requests ended with ERR_ABORTED.",
+      "Later browser events included ERR_INTERNET_DISCONNECTED and ERR_NETWORK_CHANGED."
+    ],
+    "acceptance500ms": "Not verified"
+  }
+}

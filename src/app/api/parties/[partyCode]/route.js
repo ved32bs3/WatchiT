@@ -6,43 +6,8 @@ import { toPublicParty } from "@/app/lib/party-utils";
 import { isActivePartyParticipant, readParticipantSession } from "@/app/lib/participant-session";
 import { isExactPlaylistPermutation, MAX_PLAYLIST_ITEMS } from "@/app/lib/playlist-utils.mjs";
 import { getYouTubeVideoDetails } from "@/app/lib/youtube";
-
-function getYouTubeId(value) {
-  try {
-    const url = new URL(value);
-    const host = url.hostname.toLowerCase().replace(/^www\./, "");
-    const pieces = url.pathname.split("/").filter(Boolean);
-    const id = host === "youtu.be"
-      ? pieces[0]
-      : ["youtube.com", "m.youtube.com", "youtube-nocookie.com"].includes(host)
-        ? url.searchParams.get("v") || (["embed", "shorts", "live"].includes(pieces[0]) ? pieces[1] : "")
-        : "";
-    return /^[A-Za-z0-9_-]{11}$/.test(id ?? "") ? id : "";
-  } catch {
-    return "";
-  }
-}
-
-function normalizeVideoDetails(videoUrl, videoDetails) {
-  const videoId = getYouTubeId(videoUrl);
-  const matching = videoDetails?.id === videoId ? videoDetails : null;
-  let thumbnail = "";
-  if (typeof matching?.thumbnail === "string") {
-    try {
-      const url = new URL(matching.thumbnail);
-      if (url.protocol === "https:" && ["i.ytimg.com", "yt3.ggpht.com"].includes(url.hostname)) thumbnail = url.href;
-    } catch {}
-  }
-  return {
-    url: videoUrl,
-    video_id: videoId,
-    title: typeof matching?.title === "string" && matching.title.trim()
-      ? matching.title.trim().slice(0, 200)
-      : `YouTube video ${videoId}`,
-    thumbnail,
-    channel_name: typeof matching?.channelName === "string" ? matching.channelName.trim().slice(0, 120) : "",
-  };
-}
+import { classifyVideoUrl } from "@/app/lib/video-providers.mjs";
+import { normalizeVideoDetails } from "@/app/lib/video-details.mjs";
 
 function serviceError(error) {
   console.error("Party state request failed:", error.message);
@@ -66,8 +31,10 @@ export async function GET(request, { params }) {
     const knownUrls = new Set(existingDetails.map((video) => video.url));
     const missingUrls = isParticipant ? (party.video_urls ?? []).filter((url) => !knownUrls.has(url)) : [];
     const resolvedDetails = (await Promise.all(missingUrls.map(async (url) => {
-      const videoId = getYouTubeId(url);
-      return videoId ? getYouTubeVideoDetails(url, videoId) : null;
+      const source = classifyVideoUrl(url);
+      if (source.error) return null;
+      if (source.provider === "youtube") return getYouTubeVideoDetails(url, source.providerVideoId);
+      return normalizeVideoDetails(url);
     }))).filter(Boolean);
     if (resolvedDetails.length) {
       await Party.updateOne(
@@ -132,8 +99,9 @@ export async function PATCH(request, { params }) {
       const videoUrl = typeof (body.videoUrl ?? body.videoUrlToAdd) === "string"
         ? (body.videoUrl ?? body.videoUrlToAdd).trim()
         : "";
-      if (!videoUrl || videoUrl.length > 2048 || !getYouTubeId(videoUrl)) {
-        return NextResponse.json({ error: "Provide a valid YouTube video URL to add to the playlist." }, { status: 400 });
+      const source = classifyVideoUrl(videoUrl);
+      if (!videoUrl || source.error) {
+        return NextResponse.json({ error: source.error || "Provide a supported video URL to add to the playlist." }, { status: 400 });
       }
       if (videoUrls.includes(videoUrl)) return NextResponse.json({ party: toPublicParty(current) });
       if (videoUrls.length >= MAX_PLAYLIST_ITEMS) {

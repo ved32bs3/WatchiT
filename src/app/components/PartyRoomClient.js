@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { io } from "socket.io-client";
@@ -8,9 +9,16 @@ import { movePlaylistItem } from "@/app/lib/playlist-utils.mjs";
 import PartyVideoPlayer from "@/app/components/PartyVideoPlayer";
 import PartyChatPanel from "@/app/components/PartyChatPanel";
 import PartyPollPanel from "@/app/components/PartyPollPanel";
+import PlaybackDiagnosticsPanel from "@/app/components/PlaybackDiagnosticsPanel";
+import MovieRecommendations from "@/app/components/MovieRecommendations";
 import VideoSearch from "@/app/components/VideoSearch";
-import Image from "next/image";
-import { clearPartySession, getYouTubeVideoId, partyRequest } from "@/app/lib/partyApi";
+import { clearPartySession, partyRequest } from "@/app/lib/partyApi";
+import { classifyVideoUrl } from "@/app/lib/video-providers.mjs";
+import {
+  estimateServerClockOffset,
+  getPlaybackDiagnosticClientId,
+  recordPlaybackDiagnostic,
+} from "@/app/lib/playback-diagnostics.mjs";
 
 const QUICK_REACTIONS = [
   { emoji: "❤️", label: "Love it" },
@@ -47,6 +55,7 @@ export default function PartyRoom() {
   const [reactions, setReactions] = useState([]);
   const [socketStatus, setSocketStatus] = useState("connecting");
   const [serverClockOffsetMs, setServerClockOffsetMs] = useState(0);
+  const [serverClockUncertaintyMs, setServerClockUncertaintyMs] = useState(Number.POSITIVE_INFINITY);
   const [error, setError] = useState("");
   const [videoError, setVideoError] = useState("");
   const [isChangingVideo, setIsChangingVideo] = useState(false);
@@ -56,8 +65,25 @@ export default function PartyRoom() {
   const [partyEnded, setPartyEnded] = useState(false);
   const [autoplayVideoId, setAutoplayVideoId] = useState("");
   const socketRef = useRef(null);
+  const clockSyncRef = useRef({ offsetMs: 0, uncertaintyMs: Number.POSITIVE_INFINITY });
   const reactionTimers = useRef(new Map());
   const lastSocketVideoUrl = useRef("");
+
+  const reportPlaybackDiagnostic = useCallback((event) => {
+    if (process.env.NODE_ENV !== "development") return;
+    const clientId = getPlaybackDiagnosticClientId();
+    const diagnostic = {
+      ...event,
+      roomId: code,
+      eventAtClientMs: Number.isFinite(event.eventAtClientMs) ? event.eventAtClientMs : Date.now(),
+      clientId,
+      participantId: room?.participant?.participantId ?? null,
+      serverClockOffsetMs: Number.isFinite(event.serverClockOffsetMs) ? event.serverClockOffsetMs : clockSyncRef.current.offsetMs,
+      clockUncertaintyMs: Number.isFinite(event.clockUncertaintyMs) ? event.clockUncertaintyMs : clockSyncRef.current.uncertaintyMs,
+    };
+    recordPlaybackDiagnostic(diagnostic);
+    if (socketRef.current?.connected) socketRef.current.emit("party:diagnostics", diagnostic);
+  }, [code, room?.participant?.participantId]);
 
   useEffect(() => {
     if (!/^\d{6}$/.test(code)) return undefined;
@@ -86,6 +112,10 @@ export default function PartyRoom() {
   useEffect(() => {
     if (!participantName || !participantRole) return undefined;
 
+    let cancelled = false;
+    let clockSyncTimer = null;
+    let clockSyncInFlight = false;
+
     let token;
     try {
       token = window.sessionStorage.getItem(`watchit:party:${code}`);
@@ -108,27 +138,85 @@ export default function PartyRoom() {
     });
     socketRef.current = socket;
 
+    const synchronizeClock = async () => {
+      if (clockSyncInFlight || cancelled) return;
+      clockSyncInFlight = true;
+      const observations = [];
+      try {
+        for (let index = 0; index < 5; index += 1) {
+          if (!socket.connected || cancelled) break;
+          const sentAt = Date.now();
+          const response = await new Promise((resolve) => {
+            socket.timeout(3000).emit("party:clock-sync", {}, (timeoutError, result) => {
+              resolve(timeoutError || !Number.isFinite(result?.serverTime) ? null : result);
+            });
+          });
+          const receivedAt = Date.now();
+          if (response) observations.push({ sentAt, receivedAt, serverTime: response.serverTime });
+        }
+        if (cancelled) return;
+        const estimate = estimateServerClockOffset(observations);
+        if (!estimate) {
+          reportPlaybackDiagnostic({ type: "measurement-failure", reason: "server-clock-sync-failed", sampleCount: observations.length });
+          return;
+        }
+        clockSyncRef.current = { offsetMs: estimate.offsetMs, uncertaintyMs: estimate.uncertaintyMs };
+        setServerClockOffsetMs(estimate.offsetMs);
+        setServerClockUncertaintyMs(estimate.uncertaintyMs);
+        reportPlaybackDiagnostic({
+          type: "clock-sync",
+          offsetMs: estimate.offsetMs,
+          uncertaintyMs: estimate.uncertaintyMs,
+          roundTripMs: estimate.roundTripMs,
+          sampleCount: estimate.sampleCount,
+        });
+      } finally {
+        clockSyncInFlight = false;
+      }
+    };
+
+    let hasReceivedRoomSnapshot = false;
     const setLiveState = (snapshot) => {
-      if (!snapshot || !getYouTubeVideoId(snapshot.videoUrl)) return;
+      const videoSource = classifyVideoUrl(snapshot?.videoUrl);
+      if (!snapshot || videoSource.error) return;
+      const clientReceivedAt = Date.now();
+      if (hasReceivedRoomSnapshot && snapshot.commandId && Number.isFinite(snapshot.acceptedAt)) {
+        const processingServerTime = clientReceivedAt + clockSyncRef.current.offsetMs;
+        reportPlaybackDiagnostic({
+          type: "command-processed",
+          commandId: snapshot.commandId,
+          commandSource: snapshot.commandSource || "unknown",
+          acceptedAt: snapshot.acceptedAt,
+          processedAtClientMs: clientReceivedAt,
+          processedAtServerEstimate: processingServerTime,
+          serverToClientMs: processingServerTime - snapshot.acceptedAt,
+          endToEndMs: snapshot.commandOriginMeasured && Number.isFinite(snapshot.commandOriginServerTime)
+            ? processingServerTime - snapshot.commandOriginServerTime
+            : null,
+          clockUncertaintyMs: clockSyncRef.current.uncertaintyMs,
+          videoId: videoSource.id,
+          positionSeconds: snapshot.positionSeconds,
+          playerState: null,
+        });
+      }
+      hasReceivedRoomSnapshot = true;
       if (snapshot.videoUrl !== lastSocketVideoUrl.current) {
         lastSocketVideoUrl.current = snapshot.videoUrl;
-        setAutoplayVideoId(participantRole === "host" && snapshot.isPlaying ? getYouTubeVideoId(snapshot.videoUrl) : "");
+        setAutoplayVideoId(participantRole === "host" && snapshot.isPlaying ? videoSource.id : "");
       }
-      setSocketPlayback({ ...snapshot, clientReceivedAt: Date.now() });
+      setSocketPlayback({ ...snapshot, clientReceivedAt });
     };
 
     socket.on("connect", () => {
+      hasReceivedRoomSnapshot = false;
       setSocketStatus("connecting");
       setRoomSocket(socket);
       setError("");
-      const sentAt = Date.now();
       socket.emit("party:join", { partyCode: code }, (result) => {
         if (result?.ok) {
-          if (Number.isFinite(result.serverTime)) {
-            const offset = result.serverTime - ((sentAt + Date.now()) / 2);
-            setServerClockOffsetMs(offset);
-          }
-          setLiveState(result.state);
+          if (!hasReceivedRoomSnapshot) setLiveState(result.state);
+          synchronizeClock();
+          if (!clockSyncTimer) clockSyncTimer = window.setInterval(synchronizeClock, 60_000);
           if (result.playlist) {
             setRoom((current) => current ? {
               ...current,
@@ -155,6 +243,10 @@ export default function PartyRoom() {
       setSocketStatus("disconnected");
       setError(connectError.message || "Realtime connection failed. Reconnecting...");
     });
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") synchronizeClock();
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     socket.on("party:state", setLiveState);
     socket.on("party:playlist", (playlist) => {
       setRoom((current) => current ? {
@@ -183,7 +275,7 @@ export default function PartyRoom() {
         setError("Your role changed, but this tab could not save its updated session. Return home and rejoin.");
       }
     });
-    socket.on("party:error", (socketError) => setVideoError(socketError.message || "The realtime request failed."));
+    socket.on("party:error", (socketError) => setVideoError(socketError.error || socketError.message || "The realtime request failed."));
     socket.on("party:reaction", (reaction) => {
       const floatingReaction = {
         ...reaction,
@@ -205,13 +297,16 @@ export default function PartyRoom() {
 
     const activeReactionTimers = reactionTimers.current;
     return () => {
+      cancelled = true;
+      if (clockSyncTimer) window.clearInterval(clockSyncTimer);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       if (socket.connected) socket.emit("party:leave", { partyCode: code });
       socket.disconnect();
       if (socketRef.current === socket) socketRef.current = null;
       for (const timer of activeReactionTimers.values()) window.clearTimeout(timer);
       activeReactionTimers.clear();
     };
-  }, [code, participantName, participantRole]);
+  }, [code, participantName, participantRole, reportPlaybackDiagnostic]);
 
   const initialVideoUrl = room?.party?.videoUrls?.[0] ?? "";
   const initialPlayback = useMemo(() => ({
@@ -229,7 +324,14 @@ export default function PartyRoom() {
       setVideoError("Realtime connection is offline. Playback will sync after reconnecting.");
       return;
     }
-    socket.emit("party:playback", playback, (result) => {
+    const command = {
+      ...playback,
+      commandId: window.crypto.randomUUID(),
+      clientSentAt: Date.now(),
+      clientClockOffsetMs: clockSyncRef.current.offsetMs,
+      commandSource: playback.commandSource || "player-control",
+    };
+    socket.emit("party:playback", command, (result) => {
       if (!result?.ok) setVideoError(result?.error || "Could not sync host playback.");
     });
   }, []);
@@ -264,19 +366,32 @@ export default function PartyRoom() {
       return;
     }
 
+    const videoSource = classifyVideoUrl(url);
+    if (videoSource.error) {
+      setVideoError(videoSource.error);
+      return;
+    }
+    const playableUrl = videoSource.provider === "youtube" ? url.trim() : videoSource.playbackUrl;
+
     setIsChangingVideo(true);
     setVideoError("");
     try {
-      if (!room?.party?.videoUrls?.includes(url)) {
-        await commitPlaylistChange("add", { videoUrl: url, videoDetails });
+      if (!room?.party?.videoUrls?.includes(playableUrl)) {
+        await commitPlaylistChange("add", { videoUrl: playableUrl, videoDetails });
       }
 
       if (!socket.connected) throw new Error("Realtime connection dropped. The video was added to the party list; select it again when reconnected.");
-      socket.emit("party:video-select", { videoUrl: url }, (result) => {
+      socket.emit("party:video-select", {
+        videoUrl: playableUrl,
+        commandId: window.crypto.randomUUID(),
+        clientSentAt: Date.now(),
+        clientClockOffsetMs: clockSyncRef.current.offsetMs,
+        commandSource: "video-select",
+      }, (result) => {
         if (!result?.ok) setVideoError(result?.error || "Could not switch the active video.");
         else {
           setSocketPlayback(result.state);
-          setAutoplayVideoId(getYouTubeVideoId(result.state.videoUrl) ?? "");
+          setAutoplayVideoId(videoSource.id);
         }
       });
     } catch (changeError) {
@@ -402,7 +517,8 @@ export default function PartyRoom() {
   const isHost = participant.role === "host";
   const playback = socketPlayback ?? initialPlayback;
   const videoUrl = playback.videoUrl || party.videoUrls[0] || "";
-  const videoId = getYouTubeVideoId(videoUrl);
+  const videoSource = classifyVideoUrl(videoUrl);
+  const videoId = videoSource.error ? "" : videoSource.id;
   const participants = liveParticipants ?? [
     { name: party.hostName, role: "host" },
     ...party.viewers.map((name) => ({ name, role: "viewer" })),
@@ -414,7 +530,10 @@ export default function PartyRoom() {
       <div className="mx-auto max-w-7xl">
         <header className="flex flex-col gap-5 border-b border-white/10 pb-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center justify-between gap-4">
-            <Link href="/" className="text-lg font-bold tracking-tight text-white">watch<span className="text-rose-400">it</span></Link>
+            <Link href="/" className="inline-flex items-center gap-2 text-xl font-bold tracking-tight text-white">
+              <Image src="/logo.png" alt="" width={40} height={40} className="size-10 object-contain" />
+              <span>Watch<span className="text-rose-400">iT</span></span>
+            </Link>
             <span className="rounded-full border border-white/10 px-3 py-1.5 text-xs capitalize text-zinc-400">{isHost ? "Host" : "Viewer"}</span>
           </div>
           <nav aria-label="Party menu" className="flex flex-wrap items-center gap-2 text-sm">
@@ -460,6 +579,10 @@ export default function PartyRoom() {
               isHost={isHost}
               playback={playback}
               serverClockOffsetMs={serverClockOffsetMs}
+              serverClockUncertaintyMs={serverClockUncertaintyMs}
+              roomId={code}
+              participantId={participant.participantId}
+              onDiagnostic={reportPlaybackDiagnostic}
               autoplayOnSelection={autoplayVideoId === videoId}
               onHostPlaybackChange={isHost ? emitHostPlayback : undefined}
             />
@@ -526,7 +649,8 @@ export default function PartyRoom() {
           <ol className="mt-4 space-y-2">
             {party.videoUrls.map((url, index) => {
               const selected = url === videoUrl;
-              const videoIdForItem = getYouTubeVideoId(url);
+              const itemSource = classifyVideoUrl(url);
+              const videoIdForItem = itemSource.provider === "youtube" ? itemSource.providerVideoId : "";
               const details = party.videoDetails?.find((item) => item.url === url);
               const thumbnail = details?.thumbnail || (videoIdForItem ? `https://i.ytimg.com/vi/${videoIdForItem}/hqdefault.jpg` : "");
               return (
@@ -582,10 +706,17 @@ export default function PartyRoom() {
                 onSelectVideo={(url, details) => chooseActiveVideo(url, details)}
                 onAddToPlaylist={addVideoToPlaylist}
               />
+              <div className="mt-12 border-t border-white/10 pt-9">
+                <MovieRecommendations
+                  onSelectMovie={(url, details) => chooseActiveVideo(url, details)}
+                  onAddToPlaylist={addVideoToPlaylist}
+                />
+              </div>
             </div>
           </section>
         )}
       </div>
+      <PlaybackDiagnosticsPanel roomId={code} participantId={participant.participantId} socket={roomSocket} />
     </main>
   );
 }
@@ -596,7 +727,7 @@ function RoomMessage({ title, message }) {
       <section className="max-w-lg rounded-2xl border border-white/10 bg-white/[0.035] p-7 text-center">
         <h1 className="text-xl font-semibold">{title}</h1>
         <p className="mt-3 text-sm leading-6 text-zinc-400">{message}</p>
-        <Link href="/" className="mt-5 inline-block text-sm font-medium text-rose-300 underline underline-offset-4">Back to Watchit</Link>
+        <Link href="/" className="mt-5 inline-block text-sm font-medium text-rose-300 underline underline-offset-4">Back to WatchiT</Link>
       </section>
     </main>
   );

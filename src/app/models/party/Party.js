@@ -40,10 +40,17 @@ const partySchema = new mongoose.Schema(
     video_details: {
       type: [{
         url: { type: String, required: true, trim: true },
-        video_id: { type: String, required: true, trim: true },
-        title: { type: String, required: true, trim: true, maxlength: 200 },
-        thumbnail: { type: String, trim: true, maxlength: 2048 },
-        channel_name: { type: String, trim: true, maxlength: 120 },
+      video_id: { type: String, required: true, trim: true },
+      title: { type: String, required: true, trim: true, maxlength: 200 },
+      thumbnail: { type: String, trim: true, maxlength: 2048 },
+      channel_name: { type: String, trim: true, maxlength: 120 },
+      provider: { type: String, trim: true, maxlength: 40, default: "youtube" },
+      player_type: { type: String, trim: true, maxlength: 40, default: "youtube-iframe" },
+      release_year: { type: Number, min: 1880, max: 2100, default: null },
+      categories: { type: [{ type: String, trim: true, maxlength: 80 }], default: [] },
+      source_page_url: { type: String, trim: true, maxlength: 2048, default: "" },
+      license_info: { type: String, trim: true, maxlength: 1000, default: "" },
+      availability_status: { type: String, trim: true, maxlength: 40, default: "unknown" },
       }],
       default: [],
     },
@@ -59,6 +66,7 @@ if (mongoose.models.Party && (
   mongoose.models.Party.schema.path("playback") ||
   !mongoose.models.Party.schema.path("playlist_version") ||
   !mongoose.models.Party.schema.path("video_details") ||
+  !mongoose.models.Party.schema.path("video_details.player_type") ||
   !mongoose.models.Party.schema.path("host_session_id") ||
   !mongoose.models.Party.schema.path("viewer_sessions")
 )) {
