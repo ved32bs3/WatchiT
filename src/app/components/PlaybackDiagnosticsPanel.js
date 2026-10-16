@@ -28,7 +28,6 @@ export default function PlaybackDiagnosticsPanel({ roomId, participantId, socket
   const [roomDiagnostics, setRoomDiagnostics] = useState(null);
 
   useEffect(() => {
-    if (process.env.NODE_ENV !== "development") return undefined;
     const onLocalDiagnostic = (event) => {
       if (event.detail?.roomId === roomId) setLocalEvents(getPlaybackDiagnostics().filter((item) => item.roomId === roomId));
     };
@@ -74,8 +73,6 @@ export default function PlaybackDiagnosticsPanel({ roomId, participantId, socket
       clockUncertaintyMs: clockSync?.uncertaintyMs ?? null,
     };
   }, [localEvents]);
-
-  if (process.env.NODE_ENV !== "development") return null;
 
   function exportReport() {
     const blob = new Blob([JSON.stringify({

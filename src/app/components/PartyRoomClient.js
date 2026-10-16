@@ -70,7 +70,6 @@ export default function PartyRoom() {
   const lastSocketVideoUrl = useRef("");
 
   const reportPlaybackDiagnostic = useCallback((event) => {
-    if (process.env.NODE_ENV !== "development") return;
     const clientId = getPlaybackDiagnosticClientId();
     const diagnostic = {
       ...event,

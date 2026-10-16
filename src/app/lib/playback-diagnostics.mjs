@@ -128,7 +128,7 @@ export function calculateMaximumPairwiseDrift(samples, serverNowMs, {
 }
 
 export function recordPlaybackDiagnostic(event) {
-  if (typeof window === "undefined" || !event || process.env.NODE_ENV !== "development") return;
+  if (typeof window === "undefined" || !event) return;
   const store = window[LOCAL_DIAGNOSTICS_KEY] ?? (window[LOCAL_DIAGNOSTICS_KEY] = []);
   store.push({ ...event, recordedAtClientMs: Date.now() });
   if (store.length > MAX_LOCAL_DIAGNOSTIC_EVENTS) store.splice(0, store.length - MAX_LOCAL_DIAGNOSTIC_EVENTS);

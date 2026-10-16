@@ -102,7 +102,6 @@ function buildPlaybackDiagnosticsSnapshot(code, now = Date.now()) {
 }
 
 function publishPlaybackDiagnostics(io, code) {
-  if (process.env.NODE_ENV === "production") return;
   io.to(roomName(code)).emit("party:diagnostics-state", buildPlaybackDiagnosticsSnapshot(code));
 }
 
@@ -312,10 +311,6 @@ export function attachWatchPartySockets(io) {
     });
 
     socket.on("party:diagnostics", (payload, acknowledge) => {
-      if (process.env.NODE_ENV === "production") {
-        if (typeof acknowledge === "function") acknowledge({ ok: false, enabled: false });
-        return;
-      }
       if (socket.data.joinedRoom !== room || !payload || typeof payload !== "object") {
         if (typeof acknowledge === "function") acknowledge({ ok: false, error: "Join the room before reporting diagnostics." });
         return;
@@ -413,9 +408,7 @@ export function attachWatchPartySockets(io) {
         cancelRoomCleanup(code);
         await socket.join(room);
         socket.data.joinedRoom = room;
-        if (process.env.NODE_ENV !== "production") {
-          socket.emit("party:diagnostics-state", buildPlaybackDiagnosticsSnapshot(code));
-        }
+        socket.emit("party:diagnostics-state", buildPlaybackDiagnosticsSnapshot(code));
         socket.emit("party:state", roomState.snapshot);
         socket.emit("party:playlist", roomState.playlist);
         let poll = activePolls.get(code);
