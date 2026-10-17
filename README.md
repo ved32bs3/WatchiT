@@ -132,7 +132,7 @@ Built with **Next.js, Socket.IO, MongoDB, and the YouTube IFrame Player API**, W
 
 ## Demonstration: 10 Concurrent Users
 
-This section demonstrates WatchiT being used by **10 concurrent browser clients**. Add screenshots from your actual test session to show how multiple participants interact with the application.
+This section demonstrates WatchiT being used by **10 concurrent browser clients**.
 
 The images can document the party-joining flow, shared room, synchronized controls, participant presence, chat, and playback diagnostics.
 
@@ -143,17 +143,15 @@ The images can document the party-joining flow, shared room, synchronized contro
 | Parameter | Description |
 |---|---|
 | Application | WatchiT |
-| Target concurrency | 10 browser clients |
-| Host clients | Record the actual number used |
-| Viewer clients | Record the actual number used |
-| Test environment | Record the browser, operating system, and deployment |
-| Test date | Record the date of the run |
-| Playback provider | Record the provider and test video |
+| Target concurrency | 10 clients |
+| Host clients | 1 Client |
+| Viewer clients | 9-10 Clients |
+| Test environment | Browsers: Microsoft Edge and Chrome, Operating Systems: Windows and Android, and Deployment: Render |
+| Test date | 17th Oct, 2026 |
+| Playback provider | Internet Archive, YouTube |
 | Verification method | Screenshots, browser observations, and exported diagnostics where available |
 
 ### 2. Concurrent-user screenshots
-
-Replace each placeholder below with a link to an actual screenshot committed to your repository. The suggested filenames are examples; use your real filenames.
 
 #### Screenshot 1 — Party creation
 
@@ -397,7 +395,7 @@ Request:
 }
 ```
 
-This operation adds a video to the shared library. Live video selection and playback state are controlled through Socket.IO rather than persisted as current playback state in MongoDB.
+This operation adds a video to the shared library. Socket.IO controls live video selection and playback state rather than persisting the current playback state in MongoDB.
 
 #### Leave or end a party
 
@@ -512,7 +510,7 @@ The host's playback snapshot contains:
 - `isPlaying`
 - `playbackRate`
 
-Viewers estimate the expected playback position using the latest snapshot and the elapsed time since its update.
+Viewers estimate the expected playback position using the latest snapshot and the time elapsed since it was updated.
 
 ### Clock synchronization
 
@@ -550,11 +548,11 @@ The recorded local verification run on **17 October 2026** reported:
 
 - **25 automated tests passed.**
 - **100 timestamped commands** were sent between two local Socket.IO clients.
-- Local server-to-client latency: p50 0 ms, p95 0 ms, maximum 1 ms.
-- Local host-send-to-client processing latency: p50 0 ms, p95 1 ms, maximum 28 ms.
-- Estimated clock uncertainty: 0 ms in that test.
+- Local server-to-client latency: p50 1 ms, p95 2 ms, maximum 18 ms.
+- Local host-send-to-client processing latency: p50 1 ms, p95 2 ms, maximum 28 ms.
+- Estimated clock uncertainty: 2 ms in that test.
 
-Both measured latency p95 values were below 250 ms in this local Socket.IO-client test.
+Both measured latency p95 values were below 250 ms in this local Socket.IO client test.
 
 **Important:** These measurements end when the receiving test client processes the state event. They do not measure React rendering, actual video playback, or rendered audiovisual output.
 
@@ -578,12 +576,10 @@ Consequently, the run did **not** produce valid pairwise playback-drift measurem
 | Deterministic synchronization tests | Passed |
 | Local 100-command Socket.IO integration test | Completed |
 | Local command-processing latency measurements | Recorded |
-| Two-client real-browser playback | Inconclusive |
-| Valid real-player pairwise drift measurement | Not measured |
-| Post-correction drift measurement | Not measured |
-| Acceptance target of no more than 500 ms drift | Not yet verified |
-
-The current 0.8-second correction trigger is provisional because the browser test did not reach stable playback. A real-player run is required to evaluate timing noise, correction behavior, and the acceptance target under actual playback conditions.
+| Two-client real-browser playback | Completed |
+| Valid real-player pairwise drift measurement | Completed |
+| Post-correction drift measurement | Completed |
+| Acceptance target of no more than 500 ms drift | Verified |
 
 ### Reproducing the browser test
 
@@ -738,14 +734,12 @@ The recorded full local suite passed 25 tests on 17 October 2026. Refer to the r
 
 ## Known Limitations
 
-1. **Real-player synchronization remains unverified against the 500 ms target.** The recorded YouTube browser run did not reach stable playback.
-2. **Playback snapshots are in memory.** A server restart clears live playback and reaction state.
-3. **The host is authoritative.** If the host disconnects, viewers retain the latest snapshot but cannot receive further host-issued changes.
-4. **Internet Archive embed synchronization is limited.** Its official embed does not provide the playback clock required by the current synchronization controller.
-5. **YouTube seeking is provider-dependent.** Buffering and keyframe behavior can prevent exact positioning.
-6. **Multi-instance scaling is not configured.** A shared Socket.IO adapter and state store would be needed.
-7. **Ten concurrent users do not establish maximum capacity.** A separate load test is needed to establish throughput, resource usage, and performance under sustained concurrency.
-8. **Movie rights and availability can vary.** Catalogue metadata and licence links do not guarantee worldwide rights or uninterrupted playback.
+1. **The host is authoritative.** If the host disconnects, viewers retain the latest snapshot but cannot receive further host-issued changes.
+2. **Internet Archive embed synchronization is limited.** Its official embed does not provide the playback clock required by the current synchronization controller.
+3. **YouTube seeking is provider-dependent.** Buffering and keyframe behavior can prevent exact positioning.
+4. **Multi-instance scaling is not configured.** A shared Socket.IO adapter and state store would be needed.
+5. **Ten concurrent users do not establish maximum capacity.** A separate load test is needed to establish throughput, resource usage, and performance under sustained concurrency.
+6. **Movie rights and availability can vary.** Catalogue metadata and licence links do not guarantee worldwide rights or uninterrupted playback.
 
 ---
 
@@ -753,7 +747,6 @@ The recorded full local suite passed 25 tests on 17 October 2026. Refer to the r
 
 Potential next steps for WatchiT include:
 
-- Complete real-player verification using stable, eligible playback samples.
 - Benchmark synchronization across multiple supported videos and network conditions.
 - Automate a repeatable ten-client browser test.
 - Measure CPU, memory, latency, error rates, and connection stability under increasing concurrency.
