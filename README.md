@@ -132,7 +132,11 @@ Built with **Next.js, Socket.IO, MongoDB, and the YouTube IFrame Player API**, W
 
 ## Demonstration: 10 Concurrent Users
 
+<<<<<<< HEAD
 This section demonstrates WatchiT being used by **10 concurrent browser clients**.
+=======
+This section demonstrates WatchiT being used by **10 concurrent browser clients**. The screenshots below show multiple participants interacting with the application.
+>>>>>>> 420cc93 (Version 3.3.1\u - 10 Concurrent Users Upload)
 
 The images can document the party-joining flow, shared room, synchronized controls, participant presence, chat, and playback diagnostics.
 
@@ -153,65 +157,45 @@ The images can document the party-joining flow, shared room, synchronized contro
 
 ### 2. Concurrent-user screenshots
 
+<<<<<<< HEAD
 #### Screenshot 1 — Party creation
+=======
+#### Screenshot 1 — Ten concurrent users
 
-Shows the host creating a watch party and obtaining a party code.
+Shows the party playlist and participants connected to the same room.
+>>>>>>> 420cc93 (Version 3.3.1\u - 10 Concurrent Users Upload)
 
-![WatchiT party creation](docs/images/concurrent-users/01-party-creation.png)
+![WatchiT ten concurrent users](docs/concurrent-user-images/10%20Concurrent%20users.png)
 
-#### Screenshot 2 — Participants joining
+#### Screenshot 2 — Live playback and chat
 
-Shows multiple browser clients entering the same party.
+Shows video playback alongside real-time party chat and reactions.
 
-![WatchiT participants joining](docs/images/concurrent-users/02-participants-joining.png)
+![WatchiT live video playback and chat](docs/concurrent-user-images/Live%20video%20playing%20and%20chat%20working.png)
 
-#### Screenshot 3 — Shared party room
+#### Screenshot 3 — Live poll
 
-Shows the room interface as used by multiple participants.
+Shows a party poll with viewers submitting votes.
 
-![WatchiT shared party room](docs/images/concurrent-users/03-shared-party-room.png)
+![WatchiT viewers participating in a poll](docs/concurrent-user-images/Poll%20working%20and%20viewers%20polling.png)
 
-#### Screenshot 4 — Host playback controls
+#### Screenshot 4 — Emoji reactions
 
-Shows the host's playback interface.
+Shows participants sending emoji reactions during playback.
 
-![WatchiT host playback controls](docs/images/concurrent-users/04-host-playback.png)
+![WatchiT participant emoji reactions](docs/concurrent-user-images/Users%20with%20working%20emojis.png)
 
-#### Screenshot 5 — Viewer playback interface
+#### Screenshot 5 — Mobile playback
 
-Shows a viewer connected to the same party.
+Shows the party video playing in the WatchiT mobile browser layout.
 
-![WatchiT viewer playback](docs/images/concurrent-users/05-viewer-playback.png)
+![WatchiT mobile video playback](docs/concurrent-user-images/Webapp%20running%20in%20Android%20mobile%20video%20playing.jpeg)
 
-#### Screenshot 6 — Real-time chat
+#### Screenshot 6 — Mobile party room
 
-Shows participants exchanging messages in the party room.
+Shows the WatchiT party room in a mobile browser.
 
-![WatchiT concurrent chat](docs/images/concurrent-users/06-concurrent-chat.png)
-
-#### Screenshot 7 — Emoji reactions
-
-Shows the temporary reactions displayed over the video area.
-
-![WatchiT emoji reactions](docs/images/concurrent-users/07-emoji-reactions.png)
-
-#### Screenshot 8 — Shared video library
-
-Shows the video library available to party participants.
-
-![WatchiT shared video library](docs/images/concurrent-users/08-video-library.png)
-
-#### Screenshot 9 — Playback diagnostics
-
-Shows the diagnostics panel or an exported report from the test session.
-
-![WatchiT playback diagnostics](docs/images/concurrent-users/09-playback-diagnostics.png)
-
-#### Screenshot 10 — Ten-client test overview
-
-Shows the overall test arrangement or a combined view of the ten browser clients.
-
-![WatchiT ten concurrent users](docs/images/concurrent-users/10-concurrent-users-overview.png)
+![WatchiT mobile party room](docs/concurrent-user-images/Webapp%20running%20in%20a%20Android%20mobile.jpeg)
 
 ### 3. Test observations
 
