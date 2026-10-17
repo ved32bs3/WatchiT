@@ -132,11 +132,9 @@ Built with **Next.js, Socket.IO, MongoDB, and the YouTube IFrame Player API**, W
 
 ## Demonstration: 10 Concurrent Users
 
-<<<<<<< HEAD
-This section demonstrates WatchiT being used by **10 concurrent browser clients**.
-=======
+#### This section demonstrates WatchiT being used by **10 concurrent browser clients**.
+
 This section demonstrates WatchiT being used by **10 concurrent browser clients**. The screenshots below show multiple participants interacting with the application.
->>>>>>> 420cc93 (Version 3.3.1\u - 10 Concurrent Users Upload)
 
 The images can document the party-joining flow, shared room, synchronized controls, participant presence, chat, and playback diagnostics.
 
@@ -157,13 +155,9 @@ The images can document the party-joining flow, shared room, synchronized contro
 
 ### 2. Concurrent-user screenshots
 
-<<<<<<< HEAD
-#### Screenshot 1 — Party creation
-=======
 #### Screenshot 1 — Ten concurrent users
 
-Shows the party playlist and participants connected to the same room.
->>>>>>> 420cc93 (Version 3.3.1\u - 10 Concurrent Users Upload)
+Shows the party playlist and participants connected to the same room
 
 ![WatchiT ten concurrent users](docs/concurrent-user-images/10%20Concurrent%20users.png)
 
