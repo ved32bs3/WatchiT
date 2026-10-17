@@ -65,6 +65,7 @@ export default function PartyRoom() {
   const [partyEnded, setPartyEnded] = useState(false);
   const [autoplayVideoId, setAutoplayVideoId] = useState("");
   const socketRef = useRef(null);
+  const watchSectionRef = useRef(null);
   const clockSyncRef = useRef({ offsetMs: 0, uncertaintyMs: Number.POSITIVE_INFINITY });
   const reactionTimers = useRef(new Map());
   const lastSocketVideoUrl = useRef("");
@@ -285,7 +286,7 @@ export default function PartyRoom() {
       const timer = window.setTimeout(() => {
         setReactions((current) => current.filter((item) => item.id !== reaction.id));
         reactionTimers.current.delete(reaction.id);
-      }, 2000);
+      }, 3200);
       reactionTimers.current.set(reaction.id, timer);
     });
     socket.on("party:ended", () => {
@@ -391,6 +392,11 @@ export default function PartyRoom() {
         else {
           setSocketPlayback(result.state);
           setAutoplayVideoId(videoSource.id);
+          window.requestAnimationFrame(() => {
+            const watchSection = watchSectionRef.current;
+            watchSection?.scrollIntoView({ behavior: "smooth", block: "start" });
+            watchSection?.focus({ preventScroll: true });
+          });
         }
       });
     } catch (changeError) {
@@ -529,25 +535,25 @@ export default function PartyRoom() {
       <div className="mx-auto max-w-7xl">
         <header className="flex flex-col gap-5 border-b border-white/10 pb-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center justify-between gap-4">
-            <Link href="/" className="inline-flex items-center gap-2 text-xl font-bold tracking-tight text-white">
+            <Link href="/" className="inline-flex cursor-pointer items-center gap-2 text-xl font-bold tracking-tight text-white">
               <Image src="/logo.png" alt="" width={40} height={40} className="size-10 object-contain" />
               <span>Watch<span className="text-rose-400">iT</span></span>
             </Link>
             <span className="rounded-full border border-white/10 px-3 py-1.5 text-xs capitalize text-zinc-400">{isHost ? "Host" : "Viewer"}</span>
           </div>
           <nav aria-label="Party menu" className="flex flex-wrap items-center gap-2 text-sm">
-            <Link href="/" className="rounded-lg px-3 py-2 text-zinc-300 hover:bg-white/[0.06]">Home</Link>
-            <a href="#watch" className="rounded-lg px-3 py-2 text-zinc-300 hover:bg-white/[0.06]">Watch</a>
-            <a href="#participants" className="rounded-lg px-3 py-2 text-zinc-300 hover:bg-white/[0.06]">Viewers <span className="ml-1 rounded-full bg-white/10 px-2 py-0.5 text-xs">{viewerCount}</span></a>
-            <a href="#playlist" className="rounded-lg px-3 py-2 text-zinc-300 hover:bg-white/[0.06]">Playlist</a>
-            {isHost && <a href="#recommendations" className="rounded-lg px-3 py-2 text-zinc-300 hover:bg-white/[0.06]">Find videos</a>}
+            <Link href="/" className="cursor-pointer rounded-lg px-3 py-2 text-zinc-300 hover:bg-white/[0.06]">Home</Link>
+            <a href="#watch" className="cursor-pointer rounded-lg px-3 py-2 text-zinc-300 hover:bg-white/[0.06]">Watch</a>
+            <a href="#participants" className="cursor-pointer rounded-lg px-3 py-2 text-zinc-300 hover:bg-white/[0.06]">Viewers <span className="ml-1 rounded-full bg-white/10 px-2 py-0.5 text-xs">{viewerCount}</span></a>
+            <a href="#playlist" className="cursor-pointer rounded-lg px-3 py-2 text-zinc-300 hover:bg-white/[0.06]">Playlist</a>
+            {isHost && <a href="#recommendations" className="cursor-pointer rounded-lg px-3 py-2 text-zinc-300 hover:bg-white/[0.06]">Find videos</a>}
             <span className="ml-auto rounded-lg border border-white/10 px-3 py-2 font-mono text-sm tracking-[0.15em] text-white sm:ml-2">{party.partyCode}</span>
             {isHost ? (
-              <button type="button" onClick={() => exitParty("end")} disabled={isLeaving} className="rounded-lg border border-rose-400/30 px-3 py-2 text-rose-200 transition hover:bg-rose-400/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 disabled:cursor-wait disabled:opacity-50">
+              <button type="button" onClick={() => exitParty("end")} disabled={isLeaving} className="cursor-pointer rounded-lg border border-rose-400/30 px-3 py-2 text-rose-200 transition hover:bg-rose-400/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 disabled:cursor-not-allowed disabled:opacity-50">
                 {isLeaving ? "Ending…" : "End party"}
               </button>
             ) : (
-              <button type="button" onClick={() => exitParty("leave")} disabled={isLeaving} className="rounded-lg border border-white/10 px-3 py-2 text-zinc-200 transition hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 disabled:cursor-wait disabled:opacity-50">
+              <button type="button" onClick={() => exitParty("leave")} disabled={isLeaving} className="cursor-pointer rounded-lg border border-white/10 px-3 py-2 text-zinc-200 transition hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 disabled:cursor-not-allowed disabled:opacity-50">
                 {isLeaving ? "Leaving…" : "Leave party"}
               </button>
             )}
@@ -565,10 +571,10 @@ export default function PartyRoom() {
               : "Realtime connected"}
           </p>
         </section>
-        {error && <p role="alert" className="mb-5 rounded-xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">{error}</p>}
-        {roomActionError && <p role="alert" className="mb-5 rounded-xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">{roomActionError}</p>}
+        {error && <p role="alert" className="mb-5 rounded-lg border-l-2 border-rose-400/60 bg-rose-400/[0.06] px-4 py-3 text-sm text-rose-200">{error}</p>}
+        {roomActionError && <p role="alert" className="mb-5 rounded-lg border-l-2 border-rose-400/60 bg-rose-400/[0.06] px-4 py-3 text-sm text-rose-200">{roomActionError}</p>}
 
-        <section id="watch" className="grid scroll-mt-6 gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <section id="watch" ref={watchSectionRef} tabIndex={-1} className="grid scroll-mt-6 gap-5 focus:outline-none lg:grid-cols-[minmax(0,1fr)_360px]">
           <div className="min-w-0">
           {videoId ? (
             <PartyVideoPlayer
@@ -586,9 +592,9 @@ export default function PartyRoom() {
               onHostPlaybackChange={isHost ? emitHostPlayback : undefined}
             />
           ) : (
-            <div className="grid aspect-video place-items-center rounded-2xl border border-white/10 bg-white/[0.03] text-sm text-zinc-400">No playable video is selected.</div>
+            <div className="grid aspect-video place-items-center border border-white/[0.08] bg-white/[0.02] text-sm text-zinc-400">No playable video is selected.</div>
           )}
-          {videoError && <p role="alert" className="mt-3 rounded-xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">{videoError}</p>}
+          {videoError && <p role="alert" className="mt-3 rounded-lg border-l-2 border-rose-400/60 bg-rose-400/[0.06] px-4 py-3 text-sm text-rose-200">{videoError}</p>}
           {isChangingVideo && <p role="status" className="mt-3 text-sm text-zinc-400">Adding and switching video...</p>}
           <div aria-live="polite" className="pointer-events-none fixed inset-0 z-50 overflow-hidden">
               {reactions.map((reaction) => (
@@ -596,14 +602,15 @@ export default function PartyRoom() {
                   key={reaction.id}
                   role="img"
                   aria-label={`${reaction.name} reacted ${reaction.emoji}`}
-                  className="party-reaction-float absolute bottom-0 select-none text-6xl drop-shadow-[0_4px_14px_rgba(0,0,0,0.65)]"
+                  className="party-reaction-float absolute bottom-0 inline-flex max-w-[min(80vw,340px)] items-center gap-2 rounded-full border border-white/15 bg-zinc-950/85 py-1.5 pl-2 pr-4 text-white shadow-xl backdrop-blur-sm"
                   style={{ left: reaction.left, "--reaction-drift": reaction.drift }}
                 >
-                  {reaction.emoji}
+                  <span aria-hidden="true" className="text-5xl leading-none drop-shadow-[0_4px_14px_rgba(0,0,0,0.65)]">{reaction.emoji}</span>
+                  <span className="truncate text-xs font-medium">{reaction.name}</span>
                 </span>
             ))}
           </div>
-        <section aria-label="Live reactions" className="mt-5 rounded-2xl border border-white/10 bg-white/[0.035] p-4">
+        <section aria-label="Live reactions" className="mt-5 rounded-xl border border-white/[0.07] bg-white/[0.025] p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-sm font-semibold">Send a reaction</h2>
@@ -618,7 +625,7 @@ export default function PartyRoom() {
                   title={label}
                   disabled={socketStatus !== "connected"}
                   onClick={() => sendReaction(emoji)}
-                  className="grid size-11 place-items-center rounded-xl border border-white/10 bg-white/[0.03] text-xl transition hover:border-rose-400/40 hover:bg-rose-400/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="grid size-11 cursor-pointer place-items-center rounded-lg border border-white/[0.08] bg-white/[0.025] text-xl transition hover:border-rose-400/30 hover:bg-rose-400/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {emoji}
                 </button>
@@ -636,7 +643,7 @@ export default function PartyRoom() {
           />
         </section>
 
-        <section id="playlist" className="mt-8 scroll-mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-5" aria-labelledby="playlist-title">
+        <section id="playlist" className="mt-8 scroll-mt-6 rounded-xl border border-white/[0.07] bg-white/[0.025] p-5" aria-labelledby="playlist-title">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-rose-300">Shared with the room</p>
@@ -663,10 +670,10 @@ export default function PartyRoom() {
                   </div>
                   {isHost && (
                     <div className="flex items-center gap-2">
-                      <button type="button" onClick={() => chooseActiveVideo(url)} disabled={isChangingVideo || selected || socketStatus !== "connected"} className="min-h-9 rounded-lg bg-rose-500/15 px-3 text-xs font-medium text-rose-200 hover:bg-rose-500/25 disabled:cursor-not-allowed disabled:opacity-40">Play</button>
-                      <button type="button" aria-label={`Move video ${index + 1} up`} onClick={() => reorderPlaylist(index, index - 1)} disabled={index === 0 || isChangingVideo} className="grid size-9 place-items-center rounded-lg border border-white/10 text-white hover:bg-white/[0.06] disabled:opacity-30">↑</button>
-                      <button type="button" aria-label={`Move video ${index + 1} down`} onClick={() => reorderPlaylist(index, index + 1)} disabled={index === party.videoUrls.length - 1 || isChangingVideo} className="grid size-9 place-items-center rounded-lg border border-white/10 text-white hover:bg-white/[0.06] disabled:opacity-30">↓</button>
-                      <button type="button" aria-label={`Remove video ${index + 1}`} onClick={() => removePlaylistVideo(url)} disabled={party.videoUrls.length <= 1 || isChangingVideo} className="min-h-9 rounded-lg border border-rose-400/20 px-3 text-xs text-rose-200 hover:bg-rose-400/10 disabled:cursor-not-allowed disabled:opacity-40">Remove</button>
+                      <button type="button" onClick={() => chooseActiveVideo(url)} disabled={isChangingVideo || selected || socketStatus !== "connected"} className="min-h-9 cursor-pointer rounded-lg bg-rose-500/15 px-3 text-xs font-medium text-rose-200 hover:bg-rose-500/25 disabled:cursor-not-allowed disabled:opacity-40">Play</button>
+                      <button type="button" aria-label={`Move video ${index + 1} up`} onClick={() => reorderPlaylist(index, index - 1)} disabled={index === 0 || isChangingVideo} className="grid size-9 cursor-pointer place-items-center rounded-lg border border-white/10 text-white hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-30">↑</button>
+                      <button type="button" aria-label={`Move video ${index + 1} down`} onClick={() => reorderPlaylist(index, index + 1)} disabled={index === party.videoUrls.length - 1 || isChangingVideo} className="grid size-9 cursor-pointer place-items-center rounded-lg border border-white/10 text-white hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-30">↓</button>
+                      <button type="button" aria-label={`Remove video ${index + 1}`} onClick={() => removePlaylistVideo(url)} disabled={party.videoUrls.length <= 1 || isChangingVideo} className="min-h-9 cursor-pointer rounded-lg border border-rose-400/20 px-3 text-xs text-rose-200 hover:bg-rose-400/10 disabled:cursor-not-allowed disabled:opacity-40">Remove</button>
                     </div>
                   )}
                 </li>
@@ -675,19 +682,29 @@ export default function PartyRoom() {
           </ol>
         </section>
 
-        <section id="participants" className="mt-8 scroll-mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-5">
+        <section id="participants" className="mt-8 scroll-mt-6 rounded-xl border border-white/[0.07] bg-white/[0.025] p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-base font-semibold">People watching</h2>
               <p className="mt-1 text-sm text-zinc-400">Updates as participants join or leave.</p>
             </div>
-            <span className="rounded-full bg-rose-400/10 px-3 py-1.5 text-sm text-rose-200">{viewerCount} viewers online</span>
+            <span className="inline-flex items-center gap-2 text-sm text-zinc-400"><span aria-hidden="true" className="size-2 rounded-full bg-emerald-400" />{viewerCount} {viewerCount === 1 ? "viewer" : "viewers"} online</span>
           </div>
-          <ul className="mt-4 flex flex-wrap gap-2">
+          <ul className="mt-5 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
             {participants.map((person, index) => (
-              <li key={`${person.role}-${person.name}-${index}`} className={`rounded-full border px-3 py-1.5 text-sm ${person.role === "host" ? "border-rose-400/20 bg-rose-400/[0.08] text-rose-100" : "border-white/10 text-zinc-300"}`}>
-                {person.name} {person.role === "host" ? <span className="text-xs text-rose-300">Host</span> : isHost && person.participantId && (
-                  <button type="button" onClick={() => transferHost(person.participantId, person.name)} className="ml-2 text-xs font-medium text-rose-300 underline underline-offset-2 hover:text-rose-200">Make host</button>
+              <li key={`${person.role}-${person.name}-${index}`} className="flex min-w-0 items-center gap-3 border-b border-white/[0.06] px-2 py-3 last:border-b-0 sm:border-b-0 sm:bg-black/15">
+                <span aria-hidden="true" className={`grid size-9 shrink-0 place-items-center rounded-md text-xs font-semibold ${person.role === "host" ? "bg-rose-400/15 text-rose-200" : "bg-white/[0.07] text-zinc-300"}`}>
+                  {person.name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("")}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-sm text-zinc-100">{person.name}</span>
+                <span className={`text-[10px] uppercase tracking-[0.12em] ${person.role === "host" ? "text-rose-300" : "text-zinc-500"}`}>{person.role}</span>
+                {isHost && person.role !== "host" && person.participantId && (
+                  <details className="group relative ml-1">
+                    <summary aria-label={`Actions for ${person.name}`} className="grid size-8 cursor-pointer list-none place-items-center rounded-md text-lg leading-none text-zinc-500 transition hover:bg-white/[0.07] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 [&::-webkit-details-marker]:hidden">···</summary>
+                    <div className="absolute right-0 top-full z-30 mt-1 min-w-36 border border-white/10 bg-zinc-900 p-1 shadow-xl">
+                      <button type="button" onClick={(event) => { transferHost(person.participantId, person.name); event.currentTarget.closest("details").open = false; }} className="w-full cursor-pointer px-3 py-2 text-left text-xs text-zinc-200 transition hover:bg-white/[0.08] hover:text-white">Make host</button>
+                    </div>
+                  </details>
                 )}
               </li>
             ))}
@@ -723,10 +740,10 @@ export default function PartyRoom() {
 function RoomMessage({ title, message }) {
   return (
     <main className="grid min-h-screen place-items-center bg-[#09090b] px-5 text-white">
-      <section className="max-w-lg rounded-2xl border border-white/10 bg-white/[0.035] p-7 text-center">
+      <section className="max-w-lg rounded-xl border border-white/[0.08] bg-white/[0.025] p-7 text-center">
         <h1 className="text-xl font-semibold">{title}</h1>
         <p className="mt-3 text-sm leading-6 text-zinc-400">{message}</p>
-        <Link href="/" className="mt-5 inline-block text-sm font-medium text-rose-300 underline underline-offset-4">Back to WatchiT</Link>
+        <Link href="/" className="mt-5 inline-block cursor-pointer text-sm font-medium text-rose-300 underline underline-offset-4">Back to WatchiT</Link>
       </section>
     </main>
   );

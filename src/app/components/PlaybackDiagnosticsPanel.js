@@ -9,7 +9,7 @@ import {
 
 function Metric({ label, value, detail }) {
   return (
-    <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+    <div className="rounded-md border border-white/[0.07] bg-black/25 p-3">
       <p className="text-[11px] uppercase tracking-wide text-zinc-500">{label}</p>
       <p className="mt-1 font-mono text-sm text-white">{value}</p>
       {detail && <p className="mt-1 text-[11px] text-zinc-500">{detail}</p>}
@@ -97,18 +97,19 @@ export default function PlaybackDiagnosticsPanel({ roomId, participantId, socket
         type="button"
         aria-expanded={isOpen}
         onClick={() => setIsOpen((open) => !open)}
-        className="ml-auto block rounded-lg border border-cyan-300/30 bg-zinc-950/95 px-3 py-2 text-xs font-medium text-cyan-100 shadow-lg hover:bg-zinc-900"
+        className="ml-auto flex min-h-10 cursor-pointer items-center gap-2 rounded-md border border-white/[0.12] bg-zinc-950/95 px-3 py-2 text-xs font-medium text-zinc-200 shadow-lg transition hover:border-cyan-200/30 hover:bg-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200/50"
       >
-        {isOpen ? "Hide playback diagnostics" : "Playback diagnostics"}
+        <span aria-hidden="true" className="size-1.5 rounded-full bg-cyan-300 shadow-[0_0_8px_rgba(103,232,249,0.55)]" />
+        {isOpen ? "Hide diagnostics" : "Playback diagnostics"}
       </button>
       {isOpen && (
-        <section aria-label="Playback diagnostics report" className="mt-2 max-h-[75vh] overflow-auto rounded-xl border border-cyan-300/20 bg-zinc-950/95 p-4 shadow-2xl backdrop-blur">
+        <section aria-label="Playback diagnostics report" className="mt-2 max-h-[75vh] overflow-auto rounded-lg border border-white/[0.1] border-t-cyan-300/40 bg-zinc-950/95 p-4 shadow-2xl backdrop-blur">
           <header className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 className="text-sm font-semibold">Playback diagnostics · room {roomId}</h2>
               <p className="mt-1 text-[11px] text-zinc-500">Actual iframe samples only. Estimates include clock-offset uncertainty.</p>
             </div>
-            <button type="button" onClick={exportReport} className="rounded-md border border-white/15 px-2.5 py-1.5 text-xs text-zinc-200 hover:bg-white/[0.06]">Export JSON</button>
+            <button type="button" onClick={exportReport} className="cursor-pointer rounded-md border border-white/15 px-2.5 py-1.5 text-xs text-zinc-200 hover:bg-white/[0.06]">Export JSON</button>
           </header>
 
           <p className="mt-4 text-xs font-semibold text-cyan-100">This client · {participantId || "session unavailable"}</p>

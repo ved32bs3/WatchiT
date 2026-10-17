@@ -105,7 +105,7 @@ export default function PartyChatPanel({ partyCode, participantName, socket, soc
   }
 
   return (
-    <aside aria-label="Party chat" className="flex min-h-[420px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-white/[0.035] lg:h-[min(70vw,680px)] lg:min-h-[520px]">
+    <aside aria-label="Party chat" className="flex min-h-[420px] flex-col overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.025] lg:h-[min(70vw,680px)] lg:min-h-[520px]">
       <header className="flex items-center justify-between border-b border-white/10 px-4 py-4">
         <div>
           <h2 className="text-base font-semibold text-white">Party chat</h2>
@@ -121,7 +121,7 @@ export default function PartyChatPanel({ partyCode, participantName, socket, soc
           const isOwnMessage = message.name === participantName;
           const messageTime = new Date(message.timestamp);
           return (
-            <article key={message.id} className={`max-w-[92%] rounded-2xl px-3 py-2.5 ${isOwnMessage ? "ml-auto bg-rose-500/15" : "mr-auto bg-white/[0.06]"}`}>
+            <article key={message.id} className={`max-w-[92%] rounded-lg px-3 py-2.5 ${isOwnMessage ? "ml-auto border-l-2 border-rose-300/50 bg-rose-500/[0.08]" : "mr-auto border-l-2 border-white/10 bg-white/[0.04]"}`}>
               <div className="flex items-baseline justify-between gap-4">
                 <p className={`truncate text-xs font-semibold ${isOwnMessage ? "text-rose-200" : "text-zinc-200"}`}>{message.name}</p>
                 <time className="shrink-0 text-[10px] text-zinc-500" dateTime={messageTime.toISOString()}>
@@ -152,14 +152,14 @@ export default function PartyChatPanel({ partyCode, participantName, socket, soc
             }
           }}
           placeholder="Write a message..."
-          className="min-h-16 w-full resize-none rounded-xl border border-white/10 bg-zinc-950/70 px-3 py-2.5 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-rose-400 focus:ring-2 focus:ring-rose-400/20"
+          className="min-h-16 w-full resize-none rounded-lg border border-white/[0.08] bg-zinc-950/70 px-3 py-2.5 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-rose-300/50 focus:ring-2 focus:ring-rose-300/10"
         />
         <div className="mt-2 flex items-center justify-between gap-3">
           <span className="text-[11px] text-zinc-500">Enter to send · Shift+Enter for a new line</span>
           <button
             type="submit"
             disabled={!draft.trim() || isSending}
-            className="min-h-9 rounded-lg bg-rose-500 px-4 text-xs font-semibold text-white transition hover:bg-rose-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 disabled:cursor-not-allowed disabled:opacity-40"
+            className="min-h-9 cursor-pointer rounded-lg bg-rose-500 px-4 text-xs font-semibold text-white transition hover:bg-rose-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {isSending ? "Sending..." : "Send"}
           </button>

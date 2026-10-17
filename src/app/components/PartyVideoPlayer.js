@@ -18,6 +18,43 @@ function percentileNearestRank(values, fraction = 0.95) {
   return sorted[Math.max(0, Math.ceil(sorted.length * fraction) - 1)] ?? null;
 }
 
+function ViewerFullscreenButton({ targetRef }) {
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const updateFullscreen = () => setIsFullscreen(document.fullscreenElement === targetRef.current);
+    document.addEventListener("fullscreenchange", updateFullscreen);
+    return () => document.removeEventListener("fullscreenchange", updateFullscreen);
+  }, [targetRef]);
+
+  async function toggleFullscreen() {
+    const target = targetRef.current;
+    if (!target) return;
+    setError("");
+    try {
+      if (document.fullscreenElement === target) await document.exitFullscreen();
+      else if (target.requestFullscreen) await target.requestFullscreen();
+      else setError("Fullscreen is not supported in this browser.");
+    } catch {
+      setError("Fullscreen could not be opened.");
+    }
+  }
+
+  return (
+    <>
+      <button type="button" onClick={toggleFullscreen} aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"} aria-pressed={isFullscreen} title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"} className="absolute right-3 top-3 z-20 grid size-10 cursor-pointer place-items-center rounded-md bg-black/70 text-white shadow-lg backdrop-blur transition hover:bg-black/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70">
+        {isFullscreen ? (
+          <svg aria-hidden="true" viewBox="0 0 24 24" className="size-5 fill-none stroke-current stroke-2"><path d="M8 3v5H3M16 3v5h5M3 16h5v5m13-5h-5v5" /></svg>
+        ) : (
+          <svg aria-hidden="true" viewBox="0 0 24 24" className="size-5 fill-none stroke-current stroke-2"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5" /></svg>
+        )}
+      </button>
+      {error && <span role="status" className="absolute right-3 top-14 z-20 bg-black/85 px-2 py-1 text-xs text-white">{error}</span>}
+    </>
+  );
+}
+
 function loadYouTubeApi() {
   if (window.YT?.Player) return Promise.resolve(window.YT);
   if (!youtubeApiPromise) {
@@ -52,6 +89,7 @@ function loadYouTubeApi() {
 }
 
 function YouTubePartyVideoPlayer({ videoId, diagnosticVideoId = videoId, videoUrl, isHost, playback, serverClockOffsetMs = 0, serverClockUncertaintyMs = 0, roomId, participantId, onDiagnostic, autoplayOnSelection = false, onHostPlaybackChange }) {
+  const frameRef = useRef(null);
   const mountRef = useRef(null);
   const metricsRef = useRef(null);
   const playerRef = useRef(null);
@@ -419,7 +457,7 @@ function YouTubePartyVideoPlayer({ videoId, diagnosticVideoId = videoId, videoUr
 
   return (
     <section aria-label="Party video player">
-      <div className="relative aspect-video overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl shadow-black/40">
+      <div ref={frameRef} className="party-player-frame relative aspect-video overflow-hidden border border-white/[0.08] bg-black shadow-2xl shadow-black/40">
         <div
           ref={metricsRef}
           data-sync-role={isHost ? "host" : "viewer"}
@@ -431,6 +469,7 @@ function YouTubePartyVideoPlayer({ videoId, diagnosticVideoId = videoId, videoUr
           <div ref={mountRef} className="absolute inset-0 h-full w-full" />
         </div>
         {!isHost && <div aria-hidden="true" className="absolute inset-0 z-10 cursor-default" onContextMenu={(event) => event.preventDefault()} />}
+        {!isHost && <ViewerFullscreenButton targetRef={frameRef} />}
         {playerError && <div role="alert" className="absolute inset-x-4 bottom-4 z-20 rounded-xl bg-zinc-950/90 px-4 py-3 text-sm text-rose-200">{playerError}</div>}
       </div>
       <div className="mt-3 flex items-center justify-between gap-4">
@@ -443,7 +482,7 @@ function YouTubePartyVideoPlayer({ videoId, diagnosticVideoId = videoId, videoUr
               else playerRef.current?.unMute();
               setSoundEnabled((enabled) => !enabled);
             }}
-            className="shrink-0 rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-zinc-200 hover:border-white/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300"
+            className="shrink-0 cursor-pointer rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-zinc-200 hover:border-white/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300"
           >
             {soundEnabled ? "Mute audio" : "Enable audio"}
           </button>
@@ -466,6 +505,7 @@ function ArchiveEmbedPlayer({ videoSource }) {
 }
 
 function Html5PartyPlayer({ videoId, videoUrl, isHost, playback, autoplayOnSelection, serverClockOffsetMs, serverClockUncertaintyMs, roomId, participantId, onDiagnostic, onHostPlaybackChange }) {
+  const frameRef = useRef(null);
   const videoRef = useRef(null);
   const metricsRef = useRef(null);
   const playbackRef = useRef(playback);
@@ -655,7 +695,7 @@ function Html5PartyPlayer({ videoId, videoUrl, isHost, playback, autoplayOnSelec
 
   return (
     <section aria-label="Party video player">
-      <div className="relative aspect-video overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl shadow-black/40">
+      <div ref={frameRef} className="party-player-frame relative aspect-video overflow-hidden border border-white/[0.08] bg-black shadow-2xl shadow-black/40">
         <div ref={metricsRef} data-sync-role={isHost ? "host" : "viewer"} data-sync-status="initializing" data-sync-correction-count="0" className="absolute inset-0">
           <video
             key={videoId}
@@ -678,8 +718,9 @@ function Html5PartyPlayer({ videoId, videoUrl, isHost, playback, autoplayOnSelec
           {error && <div role="alert" className="absolute inset-x-4 bottom-4 rounded-xl bg-zinc-950/90 px-4 py-3 text-sm text-rose-200">{error}</div>}
         </div>
         {!isHost && <div aria-hidden="true" className="absolute inset-0 z-10 cursor-default" onContextMenu={(event) => event.preventDefault()} />}
+        {!isHost && <ViewerFullscreenButton targetRef={frameRef} />}
       </div>
-      <div className="mt-3 flex items-center justify-between gap-4"><p className="text-xs text-zinc-500">{isHost ? "Host controls playback for everyone." : "Viewer controls are disabled. Playback follows the host."}</p>{!isHost && <button type="button" onClick={() => setSoundEnabled((value) => !value)} className="shrink-0 rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-zinc-200">{soundEnabled ? "Mute audio" : "Enable audio"}</button>}</div>
+      <div className="mt-3 flex items-center justify-between gap-4"><p className="text-xs text-zinc-500">{isHost ? "Host controls playback for everyone." : "Viewer controls are disabled. Playback follows the host."}</p>{!isHost && <button type="button" onClick={() => setSoundEnabled((value) => !value)} className="shrink-0 cursor-pointer rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-zinc-200">{soundEnabled ? "Mute audio" : "Enable audio"}</button>}</div>
     </section>
   );
 }

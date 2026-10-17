@@ -88,35 +88,41 @@ export default function VideoSearch({ isHost = false, onSelectVideo, onAddToPlay
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Search movie titles, actors, or filmmakers"
-          className="min-h-12 min-w-0 flex-1 rounded-xl border border-white/10 bg-white/[0.04] px-4 text-sm text-white outline-none placeholder:text-zinc-500 focus:border-rose-400 focus:ring-2 focus:ring-rose-400/20"
+          className="min-h-12 min-w-0 flex-1 rounded-lg border border-white/[0.08] bg-zinc-950/70 px-4 text-sm text-white outline-none placeholder:text-zinc-500 focus:border-rose-300/50 focus:ring-2 focus:ring-rose-300/10"
         />
         <button
           type="submit"
           disabled={isLoading || isLoadingCategories || !categoryId}
-          className="min-h-12 rounded-xl bg-rose-500 px-6 text-sm font-semibold text-white transition hover:bg-rose-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 disabled:cursor-wait disabled:opacity-60"
+          className="min-h-12 cursor-pointer rounded-lg bg-rose-500 px-6 text-sm font-semibold text-white transition hover:bg-rose-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isLoading ? "Searching..." : "Search videos"}
         </button>
       </form>
 
-      <div className="mt-5 space-y-4 rounded-2xl border border-white/10 bg-white/[0.025] p-4">
-        <div>
-          <p className="mb-2 text-xs font-medium text-zinc-400">Movie category</p>
-          <div className="flex flex-wrap gap-2" aria-label="Movie category filter">
+      <div className="mt-5 space-y-4 rounded-lg border border-white/[0.07] bg-black/20 p-4 sm:p-5">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-400">
+            <span className="font-medium text-zinc-300">YouTube category</span>
             {isLoadingCategories ? (
-              <span className="text-xs text-zinc-500">Loading YouTube categories...</span>
-            ) : categories.map((category) => (
-              <button
-                type="button"
-                key={category.id}
-                aria-pressed={categoryId === category.id}
-                onClick={() => { setCategoryId(category.id); setVideos([]); setHasSearched(false); }}
-                className={`rounded-full border px-3 py-1.5 text-xs transition ${categoryId === category.id ? "border-rose-400/50 bg-rose-400/15 text-rose-200" : "border-white/10 text-zinc-400 hover:border-white/25 hover:text-white"}`}
-              >
-                {category.title}
-              </button>
-            ))}
+              <span className="text-zinc-500">Loading…</span>
+            ) : (
+              <div className="flex flex-wrap gap-2" aria-label="Movie category filter">
+                {categories.map((category) => (
+                  <button
+                    type="button"
+                    key={category.id}
+                    aria-pressed={categoryId === category.id}
+                    onClick={() => { setCategoryId(category.id); setVideos([]); setHasSearched(false); }}
+                    className={`inline-flex min-h-9 cursor-pointer items-center gap-2 border-b px-2.5 py-1.5 text-xs transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 ${categoryId === category.id ? "border-rose-300/70 text-rose-100" : "border-transparent text-zinc-400 hover:text-zinc-100"}`}
+                  >
+                    <span aria-hidden="true" className={`size-1.5 rounded-full ${categoryId === category.id ? "bg-rose-300" : "bg-zinc-600"}`} />
+                    {category.title}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
+          <p className="text-[11px] text-zinc-500">YouTube uploader category</p>
         </div>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -128,7 +134,7 @@ export default function VideoSearch({ isHost = false, onSelectVideo, onAddToPlay
                   key={option.id}
                   aria-pressed={duration === option.id}
                   onClick={() => { setDuration(option.id); setVideos([]); setHasSearched(false); }}
-                  className={`rounded-full border px-3 py-1.5 text-xs transition ${duration === option.id ? "border-rose-400/50 bg-rose-400/15 text-rose-200" : "border-white/10 text-zinc-400 hover:border-white/25 hover:text-white"}`}
+                  className={`cursor-pointer rounded-md px-3 py-1.5 text-xs transition ${duration === option.id ? "bg-white/10 text-white shadow-inner shadow-white/[0.04]" : "text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"}`}
                 >
                   {option.label}
                 </button>
@@ -140,7 +146,7 @@ export default function VideoSearch({ isHost = false, onSelectVideo, onAddToPlay
             <select
               value={order}
               onChange={(event) => { setOrder(event.target.value); setVideos([]); setHasSearched(false); }}
-              className="min-h-9 rounded-lg border border-white/10 bg-zinc-900 px-2 text-xs text-white outline-none focus:border-rose-400"
+              className="min-h-9 cursor-pointer rounded-md border border-white/10 bg-zinc-900 px-2 text-xs text-white outline-none focus:border-rose-300/50"
             >
               <option value="relevance">Relevance</option>
               <option value="viewCount">Most viewed</option>
@@ -154,19 +160,19 @@ export default function VideoSearch({ isHost = false, onSelectVideo, onAddToPlay
 
       <div className="mt-6" aria-live="polite">
         {error && (
-          <p role="alert" className="rounded-xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">
+          <p role="alert" className="rounded-lg border-l-2 border-rose-400/60 bg-rose-400/[0.06] px-4 py-3 text-sm text-rose-200">
             {error}
           </p>
         )}
         {!error && !isLoading && hasSearched && videos.length === 0 && (
-          <p className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-5 text-sm text-zinc-400">
+          <p className="rounded-lg border border-white/[0.07] bg-white/[0.02] px-4 py-5 text-sm text-zinc-400">
             No videos found. Try a different search.
           </p>
         )}
         {videos.length > 0 && (
           <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {videos.map((video) => (
-              <li key={video.id} className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.035]">
+              <li key={video.id} className="overflow-hidden rounded-lg border border-white/[0.07] bg-white/[0.025] transition-colors hover:bg-white/[0.04]">
                 {video.thumbnail ? (
                   <Image src={video.thumbnail} alt="" width={480} height={270} unoptimized className="aspect-video w-full object-cover" />
                 ) : (
@@ -179,7 +185,7 @@ export default function VideoSearch({ isHost = false, onSelectVideo, onAddToPlay
                     <button
                       type="button"
                       onClick={() => onSelectVideo?.(video.url, video)}
-                      className="min-h-10 w-full rounded-lg border border-rose-400/30 bg-rose-400/10 px-3 text-sm font-medium text-rose-200 transition hover:bg-rose-400/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300"
+                      className={`min-h-10 w-full cursor-pointer rounded-lg px-3 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 ${onAddToPlaylist ? "bg-rose-500/10 text-rose-200 hover:bg-rose-500/20" : "bg-white/[0.04] text-zinc-100 hover:bg-white/[0.08]"}`}
                     >
                       {onAddToPlaylist ? "Play video" : "Select Video"}
                     </button>
@@ -187,7 +193,7 @@ export default function VideoSearch({ isHost = false, onSelectVideo, onAddToPlay
                       <button
                         type="button"
                         onClick={() => onAddToPlaylist(video.url, video)}
-                        className="min-h-10 w-full rounded-lg border border-white/15 bg-white/[0.06] px-3 text-sm font-medium text-zinc-100 transition hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300"
+                        className="min-h-10 w-full cursor-pointer rounded-lg bg-transparent px-3 text-sm font-medium text-zinc-300 transition hover:bg-white/[0.05] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300"
                       >
                         Add to Playlist
                       </button>

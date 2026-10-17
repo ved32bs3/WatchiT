@@ -41,13 +41,20 @@ body {
 }
 
 .party-reaction-float {
-  animation: party-reaction-float 2s ease-out forwards;
+  animation: party-reaction-float 3.2s ease-out forwards;
   will-change: transform, opacity;
+}
+
+.party-player-frame:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  aspect-ratio: auto;
+  border: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .party-reaction-float {
-    animation-duration: 2s;
+    animation-duration: 3.2s;
     animation-timing-function: linear;
   }
 }

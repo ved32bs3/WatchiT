@@ -9,8 +9,8 @@ import MovieRecommendations from "./components/MovieRecommendations";
 import { createParty, joinParty } from "./lib/partyApi";
 import { classifyVideoUrl } from "./lib/video-providers.mjs";
 
-const fieldClass = "mt-2 min-h-12 w-full rounded-xl border border-white/10 bg-zinc-950/70 px-4 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-rose-400 focus:ring-2 focus:ring-rose-400/20";
-const submitClass = "mt-5 min-h-12 w-full rounded-xl bg-rose-500 px-5 text-sm font-semibold text-white transition hover:bg-rose-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 disabled:cursor-wait disabled:opacity-60";
+const fieldClass = "mt-2 min-h-12 w-full rounded-lg border border-white/[0.08] bg-zinc-950/70 px-4 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-rose-300/50 focus:ring-2 focus:ring-rose-300/10";
+const submitClass = "mt-5 min-h-12 w-full cursor-pointer rounded-lg bg-rose-500 px-5 text-sm font-semibold text-white transition hover:bg-rose-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 disabled:cursor-not-allowed disabled:opacity-60";
 
 export default function Home() {
   const router = useRouter();
@@ -94,7 +94,7 @@ export default function Home() {
     <main className="min-h-screen flex-1 bg-[#09090b] px-5 py-8 text-white sm:px-8 sm:py-12">
       <div className="mx-auto max-w-6xl">
         <header className="mb-14 flex items-center justify-between border-b border-white/10 pb-5">
-          <Link href="/" className="inline-flex items-center gap-2 text-xl font-bold tracking-tight text-white">
+          <Link href="/" className="inline-flex cursor-pointer items-center gap-2 text-xl font-bold tracking-tight text-white">
             <Image src="/logo.png" alt="" width={40} height={40} className="size-10 object-contain" />
             <span>Watch<span className="text-rose-400">iT</span></span>
           </Link>
@@ -108,7 +108,7 @@ export default function Home() {
         </section>
 
         <section aria-label="Create or join a watch party" className="grid gap-5 lg:grid-cols-2">
-          <div className="rounded-2xl border border-rose-400/20 bg-gradient-to-br from-rose-400/[0.08] to-white/[0.025] p-5 sm:p-7">
+          <div className="rounded-xl border border-white/[0.07] border-t-2 border-t-rose-400/50 bg-gradient-to-br from-rose-400/[0.055] to-white/[0.015] p-5 sm:p-7">
             <div className="mb-6 flex items-start gap-4">
               <span aria-hidden="true" className="grid size-11 shrink-0 place-items-center rounded-xl bg-rose-400/15 text-lg text-rose-200">▶</span>
               <div>
@@ -124,7 +124,7 @@ export default function Home() {
 
               <div className="mt-5 flex items-center justify-between gap-3">
                 <label htmlFor="initial-video" className="text-sm font-medium text-zinc-200">First video URL</label>
-                <button type="button" onClick={() => setShowVideoSearch((visible) => !visible)} aria-expanded={showVideoSearch} aria-controls="host-video-search" className="text-xs font-medium text-rose-300 underline decoration-rose-300/40 underline-offset-4 hover:text-rose-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300">
+                <button type="button" onClick={() => setShowVideoSearch((visible) => !visible)} aria-expanded={showVideoSearch} aria-controls="host-video-search" className="cursor-pointer text-xs font-medium text-rose-300 underline decoration-rose-300/40 underline-offset-4 hover:text-rose-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300">
                   {showVideoSearch ? "Hide video recommendations" : "Browse videos & free movies"}
                 </button>
               </div>
@@ -137,7 +137,7 @@ export default function Home() {
             </form>
           </div>
 
-          <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-5 sm:p-7">
+          <div className="rounded-xl border border-white/[0.07] bg-white/[0.025] p-5 sm:p-7">
             <div className="mb-6 flex items-start gap-4">
               <span aria-hidden="true" className="grid size-11 shrink-0 place-items-center rounded-xl bg-white/[0.08] text-lg text-zinc-200">↗</span>
               <div>
